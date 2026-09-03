@@ -14,15 +14,11 @@ export async function POST(req: Request) {
                 ? process.env.STRIPE_PRICE_ID_YEARLY
                 : process.env.STRIPE_PRICE_ID_MONTHLY;
 
-        if (!priceId) {
-            return NextResponse.json(
-                { error: "Stripe Price ID not configured." },
-                { status: 400 }
-            );
-        }
-
         const session = await stripe.checkout.sessions.create({
-            payment_method_types: ["card"],
+            // Replaces payment_method_types to allow Google Pay & UPI
+            automatic_payment_methods: {
+                enabled: true,
+            },
             line_items: [
                 {
                     price: priceId,

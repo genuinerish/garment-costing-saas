@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Script from "next/script";
+import Navbar from "@/components/Navbar";
 
 export default function PricingSelectionPage() {
     const [loading, setLoading] = useState<string | null>(null);
@@ -20,12 +21,12 @@ export default function PricingSelectionPage() {
             const data = await res.json();
 
             if (!res.ok || !data.subscriptionId) {
-                alert(data.error || "Unable to initiate AutoPay subscription. Check Netlify configuration.");
+                alert(data.error || "Unable to initialize AutoPay subscription.");
                 setLoading(null);
                 return;
             }
 
-            const planNames: Record<string, string> = {
+            const planLabels: Record<string, string> = {
                 basic: "Basic Plan AutoPay (₹299/mo)",
                 premium: "Premium Plan AutoPay (₹499/mo)",
                 yearly: "Yearly Enterprise AutoPay (₹6,000/yr)",
@@ -34,11 +35,11 @@ export default function PricingSelectionPage() {
             const options = {
                 key: data.key,
                 subscription_id: data.subscriptionId,
-                name: "GARCOS ENTERPRISE",
-                description: `Recurring ${planNames[tier]}`,
+                name: "Garment Costing Software",
+                description: planLabels[tier],
                 recurring: true,
                 handler: async function (response: any) {
-                    const activateRes = await fetch("/api/user/activate-plan", {
+                    await fetch("/api/user/activate-plan", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify({
@@ -46,21 +47,14 @@ export default function PricingSelectionPage() {
                             subscriptionId: response.razorpay_subscription_id,
                         }),
                     });
-
-                    if (activateRes.ok) {
-                        alert("AutoPay Activated Successfully! Your dashboard is unlocked.");
-                        router.push("/dashboard/costing");
-                    } else {
-                        alert("Payment captured. Redirecting to your dashboard...");
-                        router.push("/dashboard/costing");
-                    }
+                    router.push("/dashboard/costing");
                 },
                 modal: {
                     ondismiss: function () {
                         setLoading(null);
                     },
                 },
-                theme: { color: "#10b981" },
+                theme: { color: "#059669" },
             };
 
             const rzp = new (window as any).Razorpay(options);
@@ -72,96 +66,96 @@ export default function PricingSelectionPage() {
     };
 
     return (
-        <>
+        <div className="min-h-screen bg-slate-50 text-slate-900">
             <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
+            <Navbar />
 
-            <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center px-4 py-12">
-                <div className="text-center max-w-xl mb-10">
-                    <h1 className="text-3xl font-bold tracking-tight">Select Your Subscription</h1>
-                    <p className="mt-2 text-slate-400 text-sm">
-                        Access requires an active subscription. AutoPay automatically renews your access each billing cycle via UPI AutoPay or Card.
+            <main className="max-w-5xl mx-auto px-6 py-12">
+                <div className="text-center max-w-xl mx-auto mb-10">
+                    <h1 className="text-3xl font-extrabold text-slate-900">Activate Your Subscription</h1>
+                    <p className="mt-2 text-sm text-slate-600">
+                        Access to the Garment Costing Engine requires an active recurring AutoPay subscription via UPI or Card.
                     </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl w-full">
-                    {/* Basic Card */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+                    {/* Basic */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm">
                         <div>
-                            <h2 className="text-lg font-bold">Basic Tier</h2>
-                            <p className="text-slate-400 text-xs mt-1">Single garment costing engine.</p>
-                            <div className="mt-5 text-3xl font-extrabold">
-                                ₹299 <span className="text-xs font-normal text-slate-400">/ mo</span>
+                            <h2 className="text-lg font-bold text-slate-900">Basic Tier</h2>
+                            <p className="text-slate-500 text-xs mt-1">Single garment calculations.</p>
+                            <div className="mt-5 text-3xl font-black text-slate-900">
+                                ₹299 <span className="text-xs font-medium text-slate-500">/ mo</span>
                             </div>
-                            <ul className="mt-5 space-y-2 text-xs text-slate-300">
-                                <li className="text-emerald-400 font-medium">✓ Single Garment Calculation Suite</li>
-                                <li className="text-emerald-400 font-medium">✓ 3 Saved Costing Calculations</li>
+                            <ul className="mt-6 space-y-2.5 text-xs text-slate-700">
+                                <li className="text-emerald-700 font-semibold">✓ Single Garment Calculations</li>
+                                <li className="text-emerald-700 font-semibold">✓ Save Up to 3 Calculations</li>
                                 <li>✓ Full Yarn, Knit, Dye & CM Formulas</li>
-                                <li className="text-slate-500 line-through">✕ Photo & Tech Pack Uploads</li>
-                                <li className="text-slate-500 line-through">✕ Custom Dynamic Components/Rows</li>
+                                <li className="text-slate-400 line-through">✕ Photo Uploads</li>
+                                <li className="text-slate-400 line-through">✕ Custom Dynamic Rows</li>
                             </ul>
                         </div>
                         <button
                             onClick={() => handleAutoPaySubscribe("basic")}
                             disabled={loading === "basic"}
-                            className="mt-8 w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-xl text-xs border border-slate-700 disabled:opacity-50"
+                            className="mt-8 w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-900 font-bold rounded-xl text-xs border border-slate-300 disabled:opacity-50"
                         >
                             {loading === "basic" ? "Connecting AutoPay..." : "Set Up AutoPay (₹299/mo)"}
                         </button>
                     </div>
 
-                    {/* Premium Card */}
-                    <div className="bg-slate-900 border-2 border-emerald-500 rounded-2xl p-6 relative flex flex-col justify-between shadow-2xl">
-                        <span className="absolute -top-3 right-5 bg-emerald-500 text-slate-950 text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase">
-                            Full Suite
+                    {/* Premium */}
+                    <div className="bg-white border-2 border-emerald-500 rounded-2xl p-6 flex flex-col justify-between shadow-xl relative">
+                        <span className="absolute -top-3 right-5 bg-emerald-600 text-white text-[10px] font-bold px-3 py-0.5 rounded-full uppercase">
+                            Recommended
                         </span>
                         <div>
-                            <h2 className="text-lg font-bold">Premium Tier</h2>
-                            <p className="text-slate-400 text-xs mt-1">Multi-garment simultaneous costing.</p>
-                            <div className="mt-5 text-3xl font-extrabold text-emerald-400">
-                                ₹499 <span className="text-xs font-normal text-slate-400">/ mo</span>
+                            <h2 className="text-lg font-bold text-slate-900">Premium Tier</h2>
+                            <p className="text-slate-500 text-xs mt-1">Multi-garment calculations & uploads.</p>
+                            <div className="mt-5 text-3xl font-black text-emerald-600">
+                                ₹499 <span className="text-xs font-medium text-slate-500">/ mo</span>
                             </div>
-                            <ul className="mt-5 space-y-2 text-xs text-slate-300">
-                                <li className="text-white font-semibold">✓ Multi-Garment Simultaneous Costing</li>
-                                <li className="text-emerald-400 font-bold">✓ Unlimited Saved Costing History</li>
-                                <li className="text-emerald-400 font-bold">✓ Upload Garment Tech Pack Photos</li>
-                                <li className="text-emerald-400 font-bold">✓ Add Unlimited Dynamic Components & Rows</li>
-                                <li>✓ Multi-Currency Quotation Calculations</li>
+                            <ul className="mt-6 space-y-2.5 text-xs text-slate-800">
+                                <li className="font-bold text-slate-900">✓ Multi-Garment Costing</li>
+                                <li className="text-emerald-700 font-bold">✓ Unlimited Saved Costings</li>
+                                <li className="text-emerald-700 font-bold">✓ Garment Photo & Tech Pack Upload</li>
+                                <li className="text-emerald-700 font-bold">✓ Unlimited Custom Dynamic Rows</li>
+                                <li>✓ Multi-Currency Conversions</li>
                             </ul>
                         </div>
                         <button
                             onClick={() => handleAutoPaySubscribe("premium")}
                             disabled={loading === "premium"}
-                            className="mt-8 w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs disabled:opacity-50 shadow-lg shadow-emerald-500/20"
+                            className="mt-8 w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs disabled:opacity-50 shadow-md shadow-emerald-600/25"
                         >
                             {loading === "premium" ? "Connecting AutoPay..." : "Set Up AutoPay (₹499/mo)"}
                         </button>
                     </div>
 
-                    {/* Yearly Card */}
-                    <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between">
+                    {/* Yearly */}
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6 flex flex-col justify-between shadow-sm">
                         <div>
-                            <span className="text-[10px] font-bold text-emerald-400 uppercase">Save ₹1,188 / Yr</span>
-                            <h2 className="text-lg font-bold mt-1">Yearly Enterprise</h2>
-                            <p className="text-slate-400 text-xs mt-1">Full access for annual operations.</p>
-                            <div className="mt-5 text-3xl font-extrabold">
-                                ₹6,000 <span className="text-xs font-normal text-slate-400">/ yr</span>
+                            <h2 className="text-lg font-bold text-slate-900">Yearly Enterprise</h2>
+                            <p className="text-slate-500 text-xs mt-1">Annual unrestricted access.</p>
+                            <div className="mt-5 text-3xl font-black text-slate-900">
+                                ₹6,000 <span className="text-xs font-medium text-slate-500">/ yr</span>
                             </div>
-                            <ul className="mt-5 space-y-2 text-xs text-slate-300">
-                                <li className="text-white font-semibold">✓ All Premium Features Included</li>
-                                <li className="text-emerald-400 font-bold">✓ Unlimited Saved History</li>
-                                <li>✓ Continuous Data Backup</li>
+                            <ul className="mt-6 space-y-2.5 text-xs text-slate-700">
+                                <li className="font-semibold text-slate-900">✓ All Premium Features</li>
+                                <li className="text-emerald-700 font-bold">✓ Unlimited Saved History</li>
+                                <li>✓ 1-Year Price Guarantee</li>
                             </ul>
                         </div>
                         <button
                             onClick={() => handleAutoPaySubscribe("yearly")}
                             disabled={loading === "yearly"}
-                            className="mt-8 w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-semibold rounded-xl text-xs border border-slate-700 disabled:opacity-50"
+                            className="mt-8 w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-900 font-bold rounded-xl text-xs border border-slate-300 disabled:opacity-50"
                         >
                             {loading === "yearly" ? "Connecting AutoPay..." : "Set Up AutoPay (₹6,000/yr)"}
                         </button>
                     </div>
                 </div>
-            </div>
-        </>
+            </main>
+        </div>
     );
 }

@@ -1,538 +1,399 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
+import { useEffect, useState } from "react";
+import Script from "next/script";
 import { useRouter } from "next/navigation";
 
-interface ComponentRow {
-    id: string;
-    name: string;
-    gsm: number;
-    consumptionKg: number;
-    ratePerKg: number;
-}
-
-export default function CostingDashboard() {
+export default function CostingProDashboard() {
     const router = useRouter();
-    const [userTier, setUserTier] = useState<string | null>(null);
-    const [loadingUser, setLoadingUser] = useState(true);
-
-    // Style Details
-    const [styleName, setStyleName] = useState("Crew Neck 180 GSM");
-    const [garmentType, setGarmentType] = useState("Single Garment");
-    const [orderQty, setOrderQty] = useState(1000);
-    const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-
-    // Single-Garment Base Inputs
-    const [yarnPricePerKg, setYarnPricePerKg] = useState(260);
-    const [knittingCost, setKnittingCost] = useState(25);
-    const [dyeingCost, setDyeingCost] = useState(70);
-    const [cmCost, setCmCost] = useState(35);
-    const [trimsCost, setTrimsCost] = useState(18);
-
-    // Premium Dynamic Rows
-    const [customComponents, setCustomComponents] = useState<ComponentRow[]>([
-        { id: "1", name: "Main Body Fabric", gsm: 180, consumptionKg: 0.22, ratePerKg: 355 },
-        { id: "2", name: "Neck Rib (1x1 Cotton)", gsm: 220, consumptionKg: 0.03, ratePerKg: 390 },
-    ]);
-
-    const [historyList, setHistoryList] = useState<any[]>([]);
-    const [saving, setSaving] = useState(false);
+    const [authChecking, setAuthChecking] = useState(true);
+    const [userEmail, setUserEmail] = useState("");
+    const [teamModalOpen, setTeamModalOpen] = useState(false);
+    const [teamMembers, setTeamMembers] = useState<{ id: string; member_email: string }[]>([]);
+    const [newMemberEmail, setNewMemberEmail] = useState("");
 
     useEffect(() => {
-        async function init() {
-            try {
-                const res = await fetch("/api/user/me");
-                if (!res.ok) {
-                    router.replace("/login");
-                    return;
-                }
+        let sessionToken = sessionStorage.getItem("garcos_session_token");
+        if (!sessionToken) {
+            sessionToken = "sess_" + Math.random().toString(36).substring(2) + Date.now().toString(36);
+            sessionStorage.setItem("garcos_session_token", sessionToken);
+        }
 
+        async function verifyAccess() {
+            try {
+                const res = await fetch("/api/user/session-check", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ clientToken: sessionToken }),
+                });
                 const data = await res.json();
-                if (data.subscription_status !== "active") {
+
+                if (!data.active) {
+                    if (data.reason === "concurrent_session_terminated") {
+                        alert("Your account was logged in from another device/browser. You have been logged out here.");
+                    }
                     router.replace("/pricing");
                     return;
                 }
 
-                setUserTier(data.plan_tier || "basic");
-                setLoadingUser(false);
-                fetchHistory();
+                if (!data.hasSubscription && data.role !== "admin") {
+                    router.replace("/pricing");
+                    return;
+                }
+
+                setUserEmail(data.email);
+                setAuthChecking(false);
+                loadTeamMembers();
             } catch (err) {
                 router.replace("/login");
             }
         }
-        init();
+
+        verifyAccess();
+        const interval = setInterval(verifyAccess, 45000);
+        return () => clearInterval(interval);
     }, [router]);
 
-    const fetchHistory = async () => {
+    const loadTeamMembers = async () => {
         try {
-            const res = await fetch("/api/history");
+            const res = await fetch("/api/team");
             if (res.ok) {
                 const data = await res.json();
-                if (Array.isArray(data)) setHistoryList(data);
+                setTeamMembers(data.members || []);
             }
-        } catch (e) {
-            console.error(e);
+        } catch { }
+    };
+
+    const handleAddTeamMember = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newMemberEmail) return;
+
+        const res = await fetch("/api/team", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ memberEmail: newMemberEmail }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.error || "Failed to add team member");
+            return;
         }
+
+        setNewMemberEmail("");
+        loadTeamMembers();
     };
 
-    const isBasic = userTier === "basic";
-
-    // Calculations
-    const basicCalculatedCost = (
-        yarnPricePerKg * 0.22 +
-        knittingCost +
-        dyeingCost +
-        cmCost +
-        trimsCost
-    ).toFixed(2);
-
-    const dynamicComponentsTotal = customComponents.reduce(
-        (acc, row) => acc + row.consumptionKg * row.ratePerKg,
-        0
-    );
-    const premiumCalculatedCost = (
-        dynamicComponentsTotal +
-        cmCost +
-        trimsCost
-    ).toFixed(2);
-
-    const activeTotalCost = isBasic ? basicCalculatedCost : premiumCalculatedCost;
-
-    // Premium Actions
-    const handleAddRow = () => {
-        setCustomComponents([
-            ...customComponents,
-            { id: Date.now().toString(), name: "Extra Fabric / Trim", gsm: 180, consumptionKg: 0.05, ratePerKg: 280 },
-        ]);
+    const handleRemoveTeamMember = async (email: string) => {
+        await fetch("/api/team", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ memberEmail: email }),
+        });
+        loadTeamMembers();
     };
 
-    const handleUpdateRow = (id: string, field: keyof ComponentRow, val: any) => {
-        setCustomComponents(
-            customComponents.map((item) => (item.id === id ? { ...item, [field]: val } : item))
-        );
-    };
-
-    const handleRemoveRow = (id: string) => {
-        setCustomComponents(customComponents.filter((item) => item.id !== id));
-    };
-
-    const handleSaveCalculation = async () => {
-        setSaving(true);
-        try {
-            const res = await fetch("/api/history", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    styleName,
-                    garmentType,
-                    orderQuantity: orderQty,
-                    totalCostINR: activeTotalCost,
-                    costData: {
-                        tier: userTier,
-                        total: activeTotalCost,
-                        components: isBasic ? "Standard Template" : customComponents,
-                    },
-                }),
-            });
-
-            const data = await res.json();
-            if (!res.ok) {
-                alert(data.error || "Save limit reached. Upgrade to Premium for unlimited saves.");
-                return;
-            }
-
-            alert("Calculation saved to history!");
-            fetchHistory();
-        } catch (err: any) {
-            alert("Error: " + err.message);
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    // Prevents the millisecond UI flash while authenticating
-    if (loadingUser) {
+    if (authChecking) {
         return (
-            <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+            <div className="min-h-screen bg-slate-50 flex items-center justify-center font-sans">
                 <div className="flex flex-col items-center gap-3">
-                    <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-xs font-semibold text-slate-500">Loading Garment Costing Engine...</span>
+                    <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-xs font-bold text-slate-600">Verifying GarKos Pro Subscription & Session...</span>
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-            {/* Light Emerald Top Bar */}
-            <header className="bg-white border-b border-slate-200 px-6 py-4 shadow-sm">
-                <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
-                    <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-lg bg-emerald-600 flex items-center justify-center text-white shadow-sm font-bold">
-                            🧵
-                        </div>
-                        <div>
-                            <div className="flex items-center gap-2">
-                                <h1 className="text-lg font-bold text-slate-900 tracking-tight">Garment Costing Engine</h1>
-                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${isBasic ? "bg-amber-50 text-amber-700 border border-amber-200" : "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                                    }`}>
-                                    {userTier} Active
-                                </span>
-                            </div>
-                            <p className="text-[11px] text-slate-500">
-                                {isBasic ? "Basic Mode: Single garment specification" : "Premium Mode: Dynamic multi-component specification"}
-                            </p>
-                        </div>
-                    </div>
+        <>
+            <Script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js" strategy="lazyOnload" />
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
 
-                    <div className="flex items-center gap-3">
-                        {isBasic && (
-                            <Link
-                                href="/pricing"
-                                className="px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg transition-colors shadow-sm"
-                            >
-                                Upgrade to Premium (₹499)
-                            </Link>
-                        )}
-                        <Link
-                            href="/admin/clients"
-                            className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors"
-                        >
-                            Client History
-                        </Link>
-                    </div>
+            {/* Header Bar */}
+            <div className="bg-white border-b border-slate-200 px-6 py-2.5 flex items-center justify-between text-xs shadow-sm no-print">
+                <div className="flex items-center gap-3">
+                    <span className="font-extrabold text-slate-900 tracking-tight flex items-center gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
+                        GarKos Engine
+                    </span>
+                    <span className="text-slate-400">|</span>
+                    <span className="text-slate-600">
+                        User: <strong className="text-slate-900">{userEmail}</strong>
+                    </span>
                 </div>
-            </header>
 
-            {/* Main Calculation Grid */}
-            <main className="max-w-7xl mx-auto p-6 grid grid-cols-1 lg:grid-cols-3 gap-8">
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setTeamModalOpen(true)}
+                        className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg font-bold flex items-center gap-1.5 transition-colors"
+                    >
+                        <i className="fa-solid fa-users text-xs"></i>
+                        Manage Team Seats ({teamMembers.length}/3)
+                    </button>
+                    <button
+                        onClick={() => {
+                            sessionStorage.clear();
+                            window.location.href = "/";
+                        }}
+                        className="text-slate-500 hover:text-rose-600 font-bold"
+                    >
+                        Sign Out
+                    </button>
+                </div>
+            </div>
 
-                {/* Costing Inputs (Left 2 Cols) */}
-                <div className="lg:col-span-2 space-y-6">
-
-                    {/* Style Details */}
-                    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-                        <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">Style Specification</h2>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {/* Team Seat Modal */}
+            {teamModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm p-4 no-print">
+                    <div className="bg-white border border-slate-200 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                             <div>
-                                <label className="block text-xs font-semibold text-slate-600 mb-1">Style Name / Ref</label>
-                                <input
-                                    type="text"
-                                    value={styleName}
-                                    onChange={(e) => setStyleName(e.target.value)}
-                                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                                />
+                                <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                                    <i className="fa-solid fa-users text-emerald-600"></i> Manage Team Gmail Seats
+                                </h3>
+                                <p className="text-[11px] text-slate-500">Authorize up to 3 colleague Gmail accounts to access your subscription.</p>
                             </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600 mb-1">Garment Mode</label>
-                                {isBasic ? (
-                                    <input
-                                        type="text"
-                                        disabled
-                                        value="Single Garment (Fixed)"
-                                        className="w-full bg-slate-100 border border-slate-200 rounded-lg px-3 py-2 text-sm text-slate-500 cursor-not-allowed"
-                                    />
-                                ) : (
-                                    <select
-                                        value={garmentType}
-                                        onChange={(e) => setGarmentType(e.target.value)}
-                                        className="w-full bg-slate-50 border border-emerald-400 rounded-lg px-3 py-2 text-sm text-slate-900"
-                                    >
-                                        <option value="Single Garment">Single Garment</option>
-                                        <option value="Tops & Bottoms Set">Tops & Bottoms Set</option>
-                                        <option value="Hoodie & Jogger Set">Hoodie & Jogger Set</option>
-                                    </select>
-                                )}
-                            </div>
-                            <div>
-                                <label className="block text-xs font-semibold text-slate-600 mb-1">Order Quantity (Pcs)</label>
-                                <input
-                                    type="number"
-                                    value={orderQty}
-                                    onChange={(e) => setOrderQty(Number(e.target.value))}
-                                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-emerald-500"
-                                />
-                            </div>
+                            <button onClick={() => setTeamModalOpen(false)} className="text-slate-400 hover:text-slate-600 font-bold">
+                                ✕
+                            </button>
                         </div>
 
-                        {/* Photo Upload Area */}
-                        <div className="pt-2">
-                            <label className="block text-xs font-semibold text-slate-600 mb-1.5">Garment Tech Pack / Photo</label>
-                            {isBasic ? (
-                                <div className="p-4 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50 text-center">
-                                    <span className="text-lg">🔒</span>
-                                    <p className="text-xs font-semibold text-slate-600 mt-1">Photo Uploads Disabled on Basic</p>
-                                    <p className="text-[11px] text-slate-500">
-                                        Upgrade to <Link href="/pricing" className="text-emerald-600 font-bold underline">Premium (₹499)</Link> to attach tech pack images.
-                                    </p>
-                                </div>
+                        <form onSubmit={handleAddTeamMember} className="flex gap-2">
+                            <input
+                                type="email"
+                                required
+                                placeholder="colleague@gmail.com"
+                                value={newMemberEmail}
+                                onChange={(e) => setNewMemberEmail(e.target.value)}
+                                className="flex-1 bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-600"
+                            />
+                            <button
+                                type="submit"
+                                disabled={teamMembers.length >= 3}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-lg transition-colors"
+                            >
+                                + Add Seat
+                            </button>
+                        </form>
+
+                        <div className="space-y-2 pt-2 max-h-48 overflow-y-auto">
+                            {teamMembers.length === 0 ? (
+                                <div className="text-center py-4 text-slate-400 text-xs">No team Gmails added yet.</div>
                             ) : (
-                                <div className="flex items-center gap-4">
-                                    <input
-                                        type="file"
-                                        accept="image/*"
-                                        onChange={(e) => {
-                                            if (e.target.files?.[0]) setPhotoPreview(URL.createObjectURL(e.target.files[0]));
-                                        }}
-                                        className="block w-full text-xs text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 cursor-pointer"
-                                    />
-                                    {photoPreview && (
-                                        <img src={photoPreview} alt="Preview" className="w-12 h-12 rounded object-cover border border-emerald-400" />
-                                    )}
-                                </div>
+                                teamMembers.map((m) => (
+                                    <div key={m.id} className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 flex items-center justify-between text-xs">
+                                        <span className="font-semibold text-slate-800">{m.member_email}</span>
+                                        <button
+                                            onClick={() => handleRemoveTeamMember(m.member_email)}
+                                            className="text-rose-500 hover:text-rose-700 font-bold text-[11px]"
+                                        >
+                                            Remove
+                                        </button>
+                                    </div>
+                                ))
                             )}
                         </div>
-                    </div>
 
-                    {/* Form Breakdown */}
-                    {isBasic ? (
-                        /* Basic Standard Table */
-                        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-                            <div className="flex items-center justify-between">
-                                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">Standard Cost Breakdown (Basic)</h2>
-                                <span className="text-[11px] text-slate-400">Fixed Template</span>
-                            </div>
-
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                                <div>
-                                    <label className="block text-xs text-slate-500 mb-1">Yarn (₹ / Kg)</label>
-                                    <input
-                                        type="number"
-                                        value={yarnPricePerKg}
-                                        onChange={(e) => setYarnPricePerKg(Number(e.target.value))}
-                                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-slate-500 mb-1">Knitting (₹/pc)</label>
-                                    <input
-                                        type="number"
-                                        value={knittingCost}
-                                        onChange={(e) => setKnittingCost(Number(e.target.value))}
-                                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-slate-500 mb-1">Dyeing (₹/pc)</label>
-                                    <input
-                                        type="number"
-                                        value={dyeingCost}
-                                        onChange={(e) => setDyeingCost(Number(e.target.value))}
-                                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-slate-500 mb-1">CM / Stitching (₹)</label>
-                                    <input
-                                        type="number"
-                                        value={cmCost}
-                                        onChange={(e) => setCmCost(Number(e.target.value))}
-                                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900"
-                                    />
-                                </div>
-                            </div>
-
-                            <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                                <span className="text-xs font-semibold text-slate-600">Trims & Packing Allocation (₹):</span>
-                                <input
-                                    type="number"
-                                    value={trimsCost}
-                                    onChange={(e) => setTrimsCost(Number(e.target.value))}
-                                    className="w-28 bg-slate-50 border border-slate-300 rounded-lg px-3 py-1 text-sm text-right text-slate-900"
-                                />
-                            </div>
-
-                            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs text-slate-500">
-                                <span>🔒 Dynamic extra rows & custom parts</span>
-                                <button
-                                    type="button"
-                                    onClick={() => alert("Custom components are unlocked on Premium (₹499).")}
-                                    className="font-semibold text-slate-400 cursor-not-allowed"
-                                >
-                                    + Add Row (Premium Only)
-                                </button>
-                            </div>
+                        <div className="pt-2 border-t border-slate-100 flex justify-end">
+                            <button
+                                onClick={() => setTeamModalOpen(false)}
+                                className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg"
+                            >
+                                Done
+                            </button>
                         </div>
-                    ) : (
-                        /* Premium Dynamic Rows */
-                        <div className="bg-white border-2 border-emerald-100 rounded-2xl p-6 shadow-sm space-y-4">
-                            <div className="flex items-center justify-between">
-                                <div>
-                                    <h2 className="text-xs font-bold uppercase tracking-wider text-emerald-700">
-                                        Dynamic Fabric & Component Breakdown (Premium)
-                                    </h2>
-                                    <p className="text-xs text-slate-500 mt-0.5">Itemize multi-fabric garments and custom trims.</p>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={handleAddRow}
-                                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition-colors shadow-sm"
-                                >
-                                    + Add Row
-                                </button>
-                            </div>
-
-                            <div className="space-y-3 pt-2">
-                                {customComponents.map((row) => (
-                                    <div
-                                        key={row.id}
-                                        className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-center p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs"
-                                    >
-                                        <div className="sm:col-span-4">
-                                            <label className="text-[10px] text-slate-500 block">Component / Fabric</label>
-                                            <input
-                                                type="text"
-                                                value={row.name}
-                                                onChange={(e) => handleUpdateRow(row.id, "name", e.target.value)}
-                                                className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-slate-900 font-medium"
-                                            />
-                                        </div>
-                                        <div className="sm:col-span-2">
-                                            <label className="text-[10px] text-slate-500 block">GSM</label>
-                                            <input
-                                                type="number"
-                                                value={row.gsm}
-                                                onChange={(e) => handleUpdateRow(row.id, "gsm", Number(e.target.value))}
-                                                className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-slate-900"
-                                            />
-                                        </div>
-                                        <div className="sm:col-span-2">
-                                            <label className="text-[10px] text-slate-500 block">Cons. (Kg)</label>
-                                            <input
-                                                type="number"
-                                                step="0.01"
-                                                value={row.consumptionKg}
-                                                onChange={(e) => handleUpdateRow(row.id, "consumptionKg", Number(e.target.value))}
-                                                className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-slate-900"
-                                            />
-                                        </div>
-                                        <div className="sm:col-span-2">
-                                            <label className="text-[10px] text-slate-500 block">Rate / Kg (₹)</label>
-                                            <input
-                                                type="number"
-                                                value={row.ratePerKg}
-                                                onChange={(e) => handleUpdateRow(row.id, "ratePerKg", Number(e.target.value))}
-                                                className="w-full bg-white border border-slate-200 rounded px-2 py-1 text-slate-900"
-                                            />
-                                        </div>
-                                        <div className="sm:col-span-2 text-right">
-                                            <span className="text-emerald-700 font-bold block text-xs">
-                                                ₹{(row.consumptionKg * row.ratePerKg).toFixed(2)}
-                                            </span>
-                                            {customComponents.length > 1 && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() => handleRemoveRow(row.id)}
-                                                    className="text-[10px] text-rose-500 hover:underline mt-1"
-                                                >
-                                                    Remove
-                                                </button>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4 pt-3 border-t border-slate-200">
-                                <div>
-                                    <label className="block text-xs text-slate-600 mb-1">Cut & Make / CM (₹)</label>
-                                    <input
-                                        type="number"
-                                        value={cmCost}
-                                        onChange={(e) => setCmCost(Number(e.target.value))}
-                                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-xs text-slate-600 mb-1">Trims & Packing (₹)</label>
-                                    <input
-                                        type="number"
-                                        value={trimsCost}
-                                        onChange={(e) => setTrimsCost(Number(e.target.value))}
-                                        className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900"
-                                    />
-                                </div>
-                            </div>
-                        </div>
-                    )}
-                </div>
-
-                {/* Right Output Card */}
-                <div className="space-y-6">
-                    <div className="bg-white border-2 border-emerald-500/50 rounded-2xl p-6 shadow-md space-y-4">
-                        <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider">
-                            Total Calculated Cost
-                        </span>
-                        <div className="text-4xl font-black text-slate-900">
-                            ₹{activeTotalCost} <span className="text-xs font-medium text-slate-500">/ pc</span>
-                        </div>
-
-                        <div className="pt-3 border-t border-slate-100 space-y-2 text-xs text-slate-600">
-                            <div className="flex justify-between">
-                                <span>Order Total ({orderQty} pcs):</span>
-                                <span className="font-bold text-slate-900">
-                                    ₹{(Number(activeTotalCost) * orderQty).toLocaleString()}
-                                </span>
-                            </div>
-                            <div className="flex justify-between">
-                                <span>Active Plan:</span>
-                                <span className="font-bold text-emerald-700 uppercase">{userTier}</span>
-                            </div>
-                        </div>
-
-                        <button
-                            onClick={handleSaveCalculation}
-                            disabled={saving}
-                            className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-emerald-600/20 disabled:opacity-50"
-                        >
-                            {saving ? "Saving..." : "Save Calculation"}
-                        </button>
-                    </div>
-
-                    {/* History Panel */}
-                    <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-                        <div className="flex items-center justify-between">
-                            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600">Saved History</h3>
-                            <span className="text-[11px] text-slate-500">
-                                {isBasic ? `${historyList.length} / 3 used` : `${historyList.length} saved (Unlimited)`}
-                            </span>
-                        </div>
-
-                        {historyList.length === 0 ? (
-                            <p className="text-xs text-slate-400 py-4 text-center">No calculations saved yet.</p>
-                        ) : (
-                            <div className="space-y-2 max-h-56 overflow-y-auto">
-                                {historyList.map((item) => (
-                                    <div
-                                        key={item.id}
-                                        className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs flex justify-between items-center"
-                                    >
-                                        <div>
-                                            <div className="font-semibold text-slate-900">{item.style_name}</div>
-                                            <div className="text-[10px] text-slate-500">
-                                                {new Date(item.created_at).toLocaleDateString()} • {item.order_quantity} pcs
-                                            </div>
-                                        </div>
-                                        <div className="font-bold text-emerald-700">₹{item.total_cost_inr}</div>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-
-                        {isBasic && historyList.length >= 3 && (
-                            <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-800">
-                                ⚠️ 3/3 calculation limit reached.{" "}
-                                <Link href="/pricing" className="underline font-bold text-amber-900">
-                                    Upgrade to Premium
-                                </Link>{" "}
-                                to save unlimited calculations.
-                            </div>
-                        )}
                     </div>
                 </div>
+            )}
 
-            </main>
-        </div>
+            {/* Embedded Raw App Engine */}
+            <iframe
+                ref={(frame) => {
+                    if (frame && frame.contentWindow && !frame.dataset.loaded) {
+                        frame.dataset.loaded = "true";
+                        const doc = frame.contentWindow.document;
+                        doc.open();
+                        doc.write(MASTER_HTML_ENGINE);
+                        doc.close();
+                    }
+                }}
+                className="w-full h-[calc(100vh-42px)] border-0"
+            />
+        </>
     );
 }
+
+const MASTER_HTML_ENGINE = `<!DOCTYPE html><html lang="en"><head>  <meta charset="UTF-8">  <meta name="viewport" content="width=device-width, initial-scale=1.0">  <title>Garment Costing Pro - Quotation & Tech Pack Suite</title>  <script src="https://cdn.tailwindcss.com"></script>  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <style>    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+    body { font-family: 'Plus Jakarta Sans', 'Inter', sans-serif; background-color: #f8fafc; color: #0f172a; }
+    @media print { .no-print { display: none !important; } body { background-color: #ffffff !important; padding: 0 !important; } .print-shadow-none { box-shadow: none !important; border: 1px solid #cbd5e1 !important; } .page-break { page-break-before: always; } }
+    .table-cell-input { width: 100%; height: 100%; padding: 0.35rem 0.25rem; background-color: transparent; text-align: center; font-weight: 600; font-size: 0.75rem; transition: all 0.15s ease-in-out; }
+    .table-cell-input:focus { background-color: #ecfdf5; outline: 2px solid #10b981; border-radius: 0.25rem; }
+    input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    @keyframes slideIn { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .animate-toast { animation: slideIn 0.25s ease-out forwards; }
+    .custom-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+  </style>
+  <script>    let appState = { buyerName: '', styleNo: '', styleDes: '', fabricComp: '', fabricTypeMode: 'knit', measurementUnit: 'cm', isSetMode: false, garmentParts: [{ id: 'part-1', name: 'PART 1: MAIN GARMENT', code: 'P1', color: 'indigo' }], wovenConsumption: '', sizeRange: '', colour: '', qty: '', targetCurrency: 'INR', exchangeRate: 1.0, lossPercent: '', cmtCosts: { 'part-1': '' }, partFabricOverrides: {}, partRejections: { 'part-1': '' }, partMargins: { 'part-1': '' }, partCommissions: { 'part-1': '' }, fabricColumns: [{ id: 'fab-0', name: 'FABRIC 1', gsm: '' }, { id: 'fab-1', name: 'FABRIC 2', gsm: '' }], processList: [{ name: 'YARN / RAW FABRIC', costs: {} }, { name: 'KNITTING / WEAVING', costs: {} }, { name: 'HEAT SET', costs: {} }, { name: 'DYEING & WASH', costs: {} }, { name: 'STENTING / FINISHING', costs: {} }, { name: 'RAISING / BRUSHING', costs: {} }, { name: 'AOP / WASH', costs: {} }, { name: 'COMPACTING', costs: {} }, { name: 'OTHER PROCESS', costs: {} }], embellishmentsList: [{ name: 'PRINTING', costs: {} }, { name: 'EMBROIDERY / WASH', costs: {} }], trimsList: [{ name: 'SEWING THREAD', costs: {} }, { name: 'BARCODE TAG', costs: {} }, { name: 'HANG TAG', costs: {} }, { name: 'FLAG LABEL', costs: {} }, { name: 'POLY BAG', costs: {} }, { name: 'MAIN LABEL', costs: {} }, { name: 'MASTER CARTON', costs: {} }, { name: 'STICKERS', costs: {} }, { name: 'TAG PIN', costs: {} }], logisticsList: [{ name: 'LOCAL TRANSPORT', costs: {} }, { name: 'LAB TESTING CHARGES', costs: {} }], measurementSections: [] };
+    let undoStack = [], redoStack = [], isRestoringState = false, stateDebounceTimer = null;
+    function pushUndoState() { if (isRestoringState) return; syncAllStateFromDOM(); const s = JSON.stringify(appState); if (undoStack.length === 0 || undoStack[undoStack.length - 1] !== s) { undoStack.push(s); if (undoStack.length > 35) undoStack.shift(); redoStack = []; updateUndoRedoButtons(); } }
+    function pushUndoDebounced() { clearTimeout(stateDebounceTimer); stateDebounceTimer = setTimeout(pushUndoState, 350); }
+    function undo() { if (undoStack.length <= 1) return; isRestoringState = true; redoStack.push(undoStack.pop()); appState = JSON.parse(undoStack[undoStack.length - 1]); restoreUIFromState(); isRestoringState = false; updateUndoRedoButtons(); showToast('Action undone'); }
+    function redo() { if (redoStack.length === 0) return; isRestoringState = true; const n = redoStack.pop(); undoStack.push(n); appState = JSON.parse(n); restoreUIFromState(); isRestoringState = false; updateUndoRedoButtons(); showToast('Action redone'); }
+    function updateUndoRedoButtons() { const u = document.getElementById('undo-btn'), r = document.getElementById('redo-btn'); if (u) { u.disabled = undoStack.length <= 1; u.classList.toggle('opacity-50', undoStack.length <= 1); } if (r) { r.disabled = redoStack.length === 0; r.classList.toggle('opacity-50', redoStack.length === 0); } }
+    function setElText(id, t) { const el = document.getElementById(id); if (el) el.innerText = t; }
+    function setElVal(id, v) { const el = document.getElementById(id); if (el) el.value = v !== undefined && v !== null ? v : ''; }
+    function getElValNum(id, fb = 0) { const el = document.getElementById(id); if (!el) return fb; const p = parseFloat(el.value); return isNaN(p) ? fb : p; }
+    function getElValString(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+    function formatRupee(val) { const n = parseFloat(val) || 0; return '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function formatForeign(val) { const s = document.getElementById('target-currency'), opt = s ? s.options[s.selectedIndex] : null, sym = opt ? opt.getAttribute('data-symbol') : '₹', n = parseFloat(val) || 0; return sym + ' ' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+    function showToast(m) { const t = document.getElementById('toast-notification'), txt = document.getElementById('toast-text'); if (t && txt) { txt.innerText = m; t.classList.remove('hidden'); setTimeout(() => t.classList.add('hidden'), 2200); } }
+    function updateCurrencySettings(focusRate = false) { const sel = document.getElementById('target-currency'); if (!sel) return; const opt = sel.options[sel.selectedIndex]; if (!opt) return; const sym = opt.getAttribute('data-symbol') || '₹', rate = parseFloat(opt.getAttribute('data-rate')) || 1.0, code = opt.value; appState.targetCurrency = code; const rateInput = document.getElementById('exchange-rate'); if (rateInput && (!rateInput.dataset.userEdited || rateInput.dataset.currency !== code)) { rateInput.value = rate; rateInput.dataset.userEdited = ""; rateInput.dataset.currency = code; appState.exchangeRate = rate; } else { appState.exchangeRate = getElValNum('exchange-rate', rate); } setElText('quote-currency-symbol', sym); setElText('quote-currency-code', code); document.querySelectorAll('.currency-label-code').forEach(el => el.innerText = code); calculateAllCosting(); }
+    function handleExchangeRateInput() { const r = document.getElementById('exchange-rate'); if (r) r.dataset.userEdited = "true"; calculateAllCosting(); pushUndoDebounced(); }
+    function syncHeaderStateFromDOM() { appState.buyerName = getElValString('buyer-name'); appState.styleNo = getElValString('style-no'); appState.styleDes = getElValString('style-des'); appState.fabricComp = getElValString('fabric-comp'); appState.fabricTypeMode = getElValString('fabric-type-mode') || 'knit'; appState.measurementUnit = getElValString('measurement-unit') || 'cm'; appState.wovenConsumption = getElValString('woven-consumption'); appState.sizeRange = getElValString('size-range'); appState.colour = getElValString('colour'); appState.qty = getElValString('qty'); const c = document.getElementById('target-currency'); if (c) appState.targetCurrency = c.value; appState.exchangeRate = getElValNum('exchange-rate', 1.0); }
+    function syncFabricationStateFromDOM() { const w = document.getElementById('fabrication-table-wrapper'); if (!w) return; const l = document.getElementById('loss-percent'); if (l) appState.lossPercent = l.value; appState.fabricColumns.forEach((fab, fIdx) => { const t = document.getElementById('fab-title-' + fIdx); if (t && t.value.trim()) fab.name = t.value.trim(); const g = document.getElementById('fab-gsm-' + fIdx); if (g) fab.gsm = g.value !== '' ? g.value : ''; }); w.querySelectorAll('.process-row').forEach((row, pIdx) => { if (appState.processList[pIdx]) { const pInp = row.querySelector('.proc-title-input'); if (pInp) appState.processList[pIdx].name = pInp.value; if (!appState.processList[pIdx].costs) appState.processList[pIdx].costs = {}; appState.fabricColumns.forEach((fab, fIdx) => { const cInp = row.querySelector('.fab-' + fIdx + '-cost'); if (cInp) appState.processList[pIdx].costs[fab.id] = cInp.value !== '' ? (parseFloat(cInp.value) || 0) : ''; }); } }); }
+    function syncExpensesStateFromDOM() { if (!appState.cmtCosts) appState.cmtCosts = {}; if (!appState.partFabricOverrides) appState.partFabricOverrides = {}; if (!appState.partRejections) appState.partRejections = {}; if (!appState.partMargins) appState.partMargins = {}; if (!appState.partCommissions) appState.partCommissions = {}; appState.garmentParts.forEach(part => { const c = document.getElementById('cmt-cost-' + part.id); if (c) appState.cmtCosts[part.id] = c.value !== '' ? parseFloat(c.value) : ''; const f = document.getElementById('fabric-cost-' + part.id); if (f && f.dataset.manual === "true") appState.partFabricOverrides[part.id] = f.value !== '' ? parseFloat(f.value) : ''; const r = document.getElementById('rejection-pct-' + part.id); if (r) appState.partRejections[part.id] = r.value !== '' ? parseFloat(r.value) : ''; const m = document.getElementById('margin-pct-' + part.id); if (m) appState.partMargins[part.id] = m.value !== '' ? parseFloat(m.value) : ''; const com = document.getElementById('commission-pct-' + part.id); if (com) appState.partCommissions[part.id] = com.value !== '' ? parseFloat(com.value) : ''; }); document.querySelectorAll('.embellishment-row').forEach((row, idx) => { if (appState.embellishmentsList[idx]) { const n = row.querySelector('.item-name-input'); if (n) appState.embellishmentsList[idx].name = n.value; if (!appState.embellishmentsList[idx].costs) appState.embellishmentsList[idx].costs = {}; appState.garmentParts.forEach(part => { const costInp = row.querySelector('.part-cost-' + part.id); if (costInp) appState.embellishmentsList[idx].costs[part.id] = costInp.value !== '' ? parseFloat(costInp.value) : ''; }); } }); document.querySelectorAll('.trim-row').forEach((row, idx) => { if (appState.trimsList[idx]) { const n = row.querySelector('.item-name-input'); if (n) appState.trimsList[idx].name = n.value; if (!appState.trimsList[idx].costs) appState.trimsList[idx].costs = {}; appState.garmentParts.forEach(part => { const costInp = row.querySelector('.part-cost-' + part.id); if (costInp) appState.trimsList[idx].costs[part.id] = costInp.value !== '' ? parseFloat(costInp.value) : ''; }); } }); document.querySelectorAll('.logistics-row').forEach((row, idx) => { if (appState.logisticsList[idx]) { const n = row.querySelector('.item-name-input'); if (n) appState.logisticsList[idx].name = n.value; if (!appState.logisticsList[idx].costs) appState.logisticsList[idx].costs = {}; appState.garmentParts.forEach(part => { const costInp = row.querySelector('.part-cost-' + part.id); if (costInp) appState.logisticsList[idx].costs[part.id] = costInp.value !== '' ? parseFloat(costInp.value) : ''; }); } }); }
+    function syncMeasurementSectionsFromDOM() { const c = document.getElementById('measurement-sections-container'); if (!c) return; const newSec = []; c.querySelectorAll('.measurement-card').forEach((card) => { const t = card.querySelector('.section-title-input'), fab = card.querySelector('.component-fabric-select'), part = card.querySelector('.component-part-select'), mult = card.querySelector('.panel-multiplier'); const rows = []; card.querySelectorAll('.weight-row').forEach((row) => { const l = row.querySelector('.label-input'), v = row.querySelector('.val-input'), a = row.querySelector('.allow-input'); rows.push({ label: l ? l.value : '', mmt: v && v.value !== '' ? parseFloat(v.value) : '', allow: a && a.value !== '' ? parseFloat(a.value) : '' }); }); newSec.push({ id: card.id, title: t ? t.value : 'COMPONENT', fabricId: fab ? fab.value : (appState.fabricColumns[0]?.id || 'fab-0'), partId: part ? part.value : (appState.garmentParts[0]?.id || 'part-1'), multiplier: mult ? (parseFloat(mult.value) || 1) : 1, rows: rows }); }); appState.measurementSections = newSec; }
+    function syncAllStateFromDOM() { syncHeaderStateFromDOM(); syncFabricationStateFromDOM(); syncExpensesStateFromDOM(); syncMeasurementSectionsFromDOM(); }
+    function addGarmentPart() { pushUndoState(); syncAllStateFromDOM(); const idx = appState.garmentParts.length + 1, id = 'part-' + Date.now(), colors = ['indigo', 'emerald', 'amber', 'rose', 'sky', 'purple']; appState.garmentParts.push({ id: id, name: 'PART ' + idx + ': COMPONENT PIECE', code: 'P' + idx, color: colors[(idx - 1) % colors.length] }); if (!appState.cmtCosts) appState.cmtCosts = {}; appState.cmtCosts[id] = ''; if (!appState.partRejections) appState.partRejections = {}; appState.partRejections[id] = ''; if (!appState.partMargins) appState.partMargins = {}; appState.partMargins[id] = ''; if (!appState.partCommissions) appState.partCommissions = {}; appState.partCommissions[id] = ''; renderGarmentPartsPills(); renderExpensesTable(); updatePartDropdowns(); calculateAllCosting(); pushUndoState(); showToast('Added Garment Part!'); }
+    function removeGarmentPart(partId) { if (appState.garmentParts.length <= 1) { showToast('At least one part is required'); return; } pushUndoState(); syncAllStateFromDOM(); appState.garmentParts = appState.garmentParts.filter(p => p.id !== partId); const fb = appState.garmentParts[0].id; appState.measurementSections.forEach(s => { if (s.partId === partId) s.partId = fb; }); renderGarmentPartsPills(); renderExpensesTable(); updatePartDropdowns(); calculateAllCosting(); pushUndoState(); showToast('Garment part removed'); }
+    function updatePartTitle(partId, newTitle) { const p = appState.garmentParts.find(x => x.id === partId); if (p) { p.name = newTitle.trim() || p.name; updatePartDropdowns(); renderExpensesTable(); calculateAllCosting(); pushUndoDebounced(); } }
+    function renderGarmentPartsPills() { const c = document.getElementById('garment-parts-pills-container'); if (!c) return; let html = ''; appState.garmentParts.forEach((part) => { html += '<div class="flex items-center gap-1.5 bg-slate-800 text-white px-2.5 py-1 rounded-lg border border-slate-700 text-xs font-bold shadow-sm"><span class="w-2.5 h-2.5 rounded-full bg-' + part.color + '-400 inline-block"></span><input type="text" value="' + part.name + '" onchange="updatePartTitle(\\'' + part.id + '\\', this.value)" class="bg-transparent text-white font-extrabold text-xs focus:bg-slate-700 rounded px-1 uppercase tracking-wide focus:outline-none w-36 sm:w-44">' + (appState.garmentParts.length > 1 ? '<button onclick="removeGarmentPart(\\'' + part.id + '\\')" title="Delete Part" class="no-print text-slate-400 hover:text-rose-400 text-[11px] ml-1"><i class="fa-solid fa-xmark"></i></button>' : '') + '</div>'; }); c.innerHTML = html; }
+    function getPartOptionsHTML(selectedVal) { let h = ''; appState.garmentParts.forEach(p => { h += '<option value="' + p.id + '" ' + (selectedVal === p.id ? 'selected' : '') + '>' + p.name + '</option>'; }); return h; }
+    function updatePartDropdowns() { document.querySelectorAll('.component-part-select').forEach(s => { s.innerHTML = getPartOptionsHTML(s.value); }); }
+    function addEmbellishmentItem() { pushUndoState(); appState.embellishmentsList.push({ name: 'NEW EMBELLISHMENT', costs: {} }); renderExpensesTable(); calculateAllCosting(); pushUndoState(); }
+    function removeEmbellishmentItem(i) { pushUndoState(); appState.embellishmentsList.splice(i, 1); renderExpensesTable(); calculateAllCosting(); pushUndoState(); }
+    function addTrimItem() { pushUndoState(); appState.trimsList.push({ name: 'NEW TRIM ITEM', costs: {} }); renderExpensesTable(); calculateAllCosting(); pushUndoState(); }
+    function removeTrimItem(i) { pushUndoState(); appState.trimsList.splice(i, 1); renderExpensesTable(); calculateAllCosting(); pushUndoState(); }
+    function addLogisticsItem() { pushUndoState(); appState.logisticsList.push({ name: 'NEW LOGISTICS EXPENSE', costs: {} }); renderExpensesTable(); calculateAllCosting(); pushUndoState(); }
+    function removeLogisticsItem(i) { pushUndoState(); appState.logisticsList.splice(i, 1); renderExpensesTable(); calculateAllCosting(); pushUndoState(); }
+    function renderFabricationTable() { const w = document.getElementById('fabrication-table-wrapper'); if (!w) return; let th = '', gsm = ''; appState.fabricColumns.forEach((fab, idx) => { th += '<th class="p-1 border-r border-emerald-200 min-w-[110px] w-28 bg-emerald-100/70"><div class="flex items-center justify-between px-1"><input type="text" id="fab-title-' + idx + '" value="' + fab.name + '" oninput="updateFabricDropdowns(); pushUndoDebounced();" class="font-black text-center bg-transparent w-full text-emerald-950 uppercase text-[11px] focus:outline-none" placeholder="FABRIC ' + (idx+1) + '">' + (appState.fabricColumns.length > 1 ? '<button onclick="removeFabricColumn(' + idx + ')" class="no-print text-emerald-700 hover:text-rose-600 text-[10px]"><i class="fa-solid fa-xmark"></i></button>' : '') + '</div></th>'; gsm += '<td class="p-0 border-r border-emerald-200 bg-amber-50/70 min-w-[110px]"><input type="number" id="fab-gsm-' + idx + '" class="fab-' + idx + '-gsm table-cell-input font-black text-amber-950 text-xs" value="' + (fab.gsm ?? '') + '" placeholder="GSM" oninput="updateFabricDropdowns(); calculateAllCosting(); pushUndoDebounced();"></td>'; }); let rows = ''; appState.processList.forEach((proc, pIdx) => { let inps = ''; appState.fabricColumns.forEach((fab, fIdx) => { inps += '<td class="p-0 border-r border-slate-200 min-w-[110px]"><input type="number" step="0.01" class="fab-' + fIdx + '-cost table-cell-input" value="' + (proc.costs?.[fab.id] ?? '') + '" placeholder="0" oninput="calculateAllCosting(); pushUndoDebounced();"></td>'; }); rows += '<tr class="process-row hover:bg-slate-50 transition-colors"><td class="p-1 text-left font-semibold bg-slate-50 border-r border-slate-200 min-w-[230px] w-64"><div class="flex items-center justify-between gap-1"><input type="text" value="' + (proc.name || proc) + '" oninput="pushUndoDebounced()" class="proc-title-input font-semibold text-slate-800 bg-transparent w-full uppercase text-[11px] focus:outline-none" placeholder="PROCESS NAME"><div class="flex items-center no-print"><button onclick="addProcessRow(' + pIdx + ')" class="text-slate-400 hover:text-emerald-600 px-1 text-[10px]"><i class="fa-solid fa-plus"></i></button>' + (appState.processList.length > 1 ? '<button onclick="removeProcessRow(' + pIdx + ')" class="text-slate-400 hover:text-rose-600 px-1 text-[10px]"><i class="fa-solid fa-xmark"></i></button>' : '') + '</div></div></td><td class="p-1 border-r border-slate-200 min-w-[40px] w-10"></td>' + inps + '</tr>'; }); let subt = '', loss = '', gtot = ''; appState.fabricColumns.forEach((fab, idx) => { subt += '<td class="p-1.5 border-r border-slate-200 text-slate-900 font-bold min-w-[110px]" id="fab-' + idx + '-subtotal">₹0.00</td>'; loss += '<td class="p-2 border-r border-amber-100 font-semibold text-amber-900 min-w-[110px]" id="fab-' + idx + '-loss">₹0.00</td>'; gtot += '<td class="p-2 border-r border-emerald-200 text-xs font-black text-emerald-900 min-w-[110px]" id="fab-' + idx + '-gtotal">₹0.00</td>'; }); w.innerHTML = '<table class="w-full text-xs text-center border-collapse min-w-max"><thead><tr class="bg-emerald-100/90 border-b border-emerald-300 text-emerald-950 font-black text-[11px]"><th class="p-2 text-left border-r border-emerald-200 min-w-[230px] w-64">PROCESS / COST HEAD</th><th class="p-2 border-r border-emerald-200 min-w-[40px] w-10">%</th>' + th + '</tr></thead><tbody class="divide-y divide-slate-200"><tr class="bg-amber-50/90 border-b border-amber-200 font-extrabold"><td class="p-1.5 text-left border-r border-amber-200 text-amber-950 font-black min-w-[230px] w-64"><div class="flex items-center gap-1.5"><i class="fa-solid fa-weight-scale text-amber-700 text-xs"></i><span>FABRIC GSM (g/m²)</span></div></td><td class="p-1 border-r border-amber-200 text-[10px] text-amber-700">GSM</td>' + gsm + '</tr>' + rows + '<tr class="font-bold bg-slate-100"><td class="p-1.5 text-left border-r border-slate-200 text-slate-800 min-w-[230px] w-64">BASE PROCESS TOTAL (₹)</td><td class="p-1.5 border-r border-slate-200"></td>' + subt + '</tr><tr class="bg-amber-50/70"><td class="p-2 text-left font-bold text-amber-950 border-r border-amber-200 min-w-[230px] w-64">PROCESS LOSS WASTAGE</td><td class="p-0 border-r border-amber-200"><input type="number" id="loss-percent" value="' + (appState.lossPercent ?? '') + '" placeholder="0%" oninput="calculateAllCosting(); pushUndoDebounced();" class="table-cell-input font-black text-amber-800"></td>' + loss + '</tr><tr class="font-black bg-emerald-100 text-emerald-950 border-t-2 border-b-2 border-emerald-400"><td class="p-2 text-left border-r border-emerald-300 min-w-[230px] w-64">FINAL FABRIC RATE (₹ / kg or m)</td><td class="p-2 border-r border-emerald-300"></td>' + gtot + '</tr></tbody></table>'; }
+    function renderExpensesTable() { const w = document.getElementById('expenses-table-wrapper'); if (!w) return; let th = ''; appState.garmentParts.forEach(p => { th += '<th class="p-2 border-r border-slate-700 bg-slate-900/90 text-emerald-300 font-extrabold text-[11px] min-w-[100px] text-center">' + p.name + '</th>'; }); let emb = '', trim = '', log = '', fCell = '', cCell = '', dirCell = '', rejP = '', rejC = '', pRej = '', marP = '', marC = '', exC = '', comP = '', comC = '', buyC = ''; appState.embellishmentsList.forEach((it, idx) => { let c = ''; appState.garmentParts.forEach(p => { c += '<td class="p-0 border-r border-slate-200"><input type="number" step="0.01" class="part-cost-' + p.id + ' table-cell-input text-slate-800 font-semibold" value="' + (it.costs?.[p.id] ?? '') + '" placeholder="0" oninput="syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();"></td>'; }); emb += '<tr class="embellishment-row hover:bg-slate-50 transition-colors"><td class="p-1 text-left font-semibold bg-slate-50 border-r border-slate-200 pl-3"><div class="flex items-center justify-between"><input type="text" value="' + it.name + '" oninput="syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();" class="item-name-input text-slate-800 bg-transparent w-full text-[11px] font-medium uppercase focus:outline-none"><button onclick="removeEmbellishmentItem(' + idx + ')" class="no-print text-slate-400 hover:text-rose-600 px-1 text-[10px]"><i class="fa-solid fa-xmark"></i></button></div></td>' + c + '<td class="p-1 border-r border-slate-200 font-bold text-slate-900 text-center embellishment-row-total">₹0.00</td></tr>'; }); appState.trimsList.forEach((it, idx) => { let c = ''; appState.garmentParts.forEach(p => { c += '<td class="p-0 border-r border-slate-200"><input type="number" step="0.01" class="part-cost-' + p.id + ' table-cell-input text-slate-800 font-semibold" value="' + (it.costs?.[p.id] ?? '') + '" placeholder="0" oninput="syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();"></td>'; }); trim += '<tr class="trim-row hover:bg-slate-50 transition-colors"><td class="p-1 text-left font-semibold bg-slate-50 border-r border-slate-200 pl-3"><div class="flex items-center justify-between"><input type="text" value="' + it.name + '" oninput="syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();" class="item-name-input text-slate-800 bg-transparent w-full text-[11px] font-medium uppercase focus:outline-none"><button onclick="removeTrimItem(' + idx + ')" class="no-print text-slate-400 hover:text-rose-600 px-1 text-[10px]"><i class="fa-solid fa-xmark"></i></button></div></td>' + c + '<td class="p-1 border-r border-slate-200 font-bold text-slate-900 text-center trim-row-total">₹0.00</td></tr>'; }); appState.logisticsList.forEach((it, idx) => { let c = ''; appState.garmentParts.forEach(p => { c += '<td class="p-0 border-r border-slate-200"><input type="number" step="0.01" class="part-cost-' + p.id + ' table-cell-input text-slate-800 font-semibold" value="' + (it.costs?.[p.id] ?? '') + '" placeholder="0" oninput="syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();"></td>'; }); log += '<tr class="logistics-row hover:bg-slate-50 transition-colors"><td class="p-1 text-left font-semibold bg-slate-50 border-r border-slate-200 pl-3"><div class="flex items-center justify-between"><input type="text" value="' + it.name + '" oninput="syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();" class="item-name-input text-slate-800 bg-transparent w-full text-[11px] font-medium uppercase focus:outline-none"><button onclick="removeLogisticsItem(' + idx + ')" class="no-print text-slate-400 hover:text-rose-600 px-1 text-[10px]"><i class="fa-solid fa-xmark"></i></button></div></td>' + c + '<td class="p-1 border-r border-slate-200 font-bold text-slate-900 text-center logistics-row-total">₹0.00</td></tr>'; }); appState.garmentParts.forEach(p => { fCell += '<td class="p-0 border-r border-emerald-200"><input type="number" step="0.01" id="fabric-cost-' + p.id + '" value="' + (appState.partFabricOverrides?.[p.id] ?? '') + '" placeholder="0" oninput="this.dataset.manual=\\'true\\'; syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();" class="table-cell-input font-black text-emerald-900 text-xs"></td>'; cCell += '<td class="p-0 border-r border-slate-200"><input type="number" step="0.01" id="cmt-cost-' + p.id + '" value="' + (appState.cmtCosts?.[p.id] ?? '') + '" placeholder="0" oninput="syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();" class="table-cell-input font-black text-slate-900 text-xs"></td>'; dirCell += '<td class="p-1.5 border-r border-slate-300 text-slate-900 font-black text-xs" id="direct-cost-' + p.id + '">₹0.00</td>'; rejP += '<td class="p-0 border-r border-amber-200 bg-amber-50/80"><input type="number" step="0.1" id="rejection-pct-' + p.id + '" value="' + (appState.partRejections?.[p.id] ?? '') + '" placeholder="0%" oninput="syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();" class="table-cell-input font-black text-amber-950 text-xs"></td>'; rejC += '<td class="p-1.5 border-r border-amber-100 font-bold text-amber-900 text-xs" id="rejection-cost-' + p.id + '">₹0.00</td>'; pRej += '<td class="p-1.5 border-r border-slate-200 text-slate-900 font-extrabold text-xs" id="post-rejection-' + p.id + '">₹0.00</td>'; marP += '<td class="p-0 border-r border-emerald-200 bg-emerald-50/80"><input type="number" step="0.1" id="margin-pct-' + p.id + '" value="' + (appState.partMargins?.[p.id] ?? '') + '" placeholder="0%" oninput="syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();" class="table-cell-input font-black text-emerald-950 text-xs"></td>'; marC += '<td class="p-1.5 border-r border-slate-200 text-emerald-900 font-extrabold text-xs" id="margin-val-' + p.id + '">₹0.00</td>'; exC += '<td class="p-2 border-r border-emerald-600 text-white font-black text-xs" id="exfactory-' + p.id + '">₹0.00</td>'; comP += '<td class="p-0 border-r border-indigo-200 bg-indigo-50/80"><input type="number" step="0.1" id="commission-pct-' + p.id + '" value="' + (appState.partCommissions?.[p.id] ?? '') + '" placeholder="0%" oninput="syncExpensesStateFromDOM(); calculateAllCosting(); pushUndoDebounced();" class="table-cell-input font-black text-indigo-950 text-xs"></td>'; comC += '<td class="p-1.5 border-r border-indigo-100 font-bold text-indigo-900 text-xs" id="commission-cost-' + p.id + '">₹0.00</td>'; buyC += '<td class="p-2 border-r border-slate-800 text-emerald-300 font-black text-xs" id="buyer-quote-' + p.id + '">₹0.00</td>'; }); const totCols = appState.garmentParts.length + 2; w.innerHTML = '<div class="bg-white rounded-xl border border-slate-300 overflow-hidden shadow-sm"><div class="bg-slate-800 p-2.5 px-3 flex items-center justify-between border-b border-slate-700 text-white"><span class="text-xs font-black tracking-wider uppercase text-emerald-300 flex items-center gap-2"><i class="fa-solid fa-coins"></i> Manufacturing Costing & Final Quote Summary</span></div><div class="overflow-x-auto"><table class="w-full text-xs text-center border-collapse min-w-[550px]"><thead><tr class="bg-slate-900 text-white border-b border-slate-700"><th class="p-2 text-left border-r border-slate-700 w-1/3 min-w-[190px]">COST HEAD / EXPENSE</th>' + th + '<th class="p-2 border-r border-slate-700 bg-slate-950 text-emerald-400 font-black text-[11px] min-w-[110px]">TOTAL SET (₹)</th></tr></thead><tbody class="divide-y divide-slate-200"><tr class="bg-emerald-50/70"><td class="p-2 text-left font-extrabold text-emerald-950 border-r border-emerald-100"><div class="flex items-center justify-between"><span>FABRIC COST / GARMENT (₹)</span><button onclick="resetAllFabricCostsToCalculated()" class="no-print text-[10px] text-emerald-700 hover:text-emerald-900 underline">Auto-Calc</button></div></td>' + fCell + '<td class="p-1.5 border-r border-emerald-100 font-black text-emerald-950 text-xs" id="total-set-fabric-cost">₹0.00</td></tr><tr><td class="p-2 text-left font-bold bg-slate-100 border-r border-slate-200 text-slate-900">C.M.T (CUTTING, MAKING, TRIMMING) (₹)</td>' + cCell + '<td class="p-1.5 border-r border-slate-200 font-black text-slate-900 text-xs" id="total-set-cmt-cost">₹0.00</td></tr><tr class="bg-slate-100 border-y border-slate-300 text-slate-900 font-bold"><td class="p-1.5 px-3 text-left uppercase text-[11px]" colspan="' + totCols + '"><div class="flex items-center justify-between"><span class="font-black">EMBELLISHMENTS</span><button onclick="addEmbellishmentItem()" class="no-print px-1.5 py-0.5 bg-white text-slate-800 text-[10px] font-bold rounded border border-slate-300 shadow-sm">+ Add</button></div></td></tr>' + emb + '<tr class="bg-slate-100 border-y border-slate-300 text-slate-900 font-bold"><td class="p-1.5 px-3 text-left uppercase text-[11px]" colspan="' + totCols + '"><div class="flex items-center justify-between"><span class="font-black">TRIMS & PACKAGING</span><button onclick="addTrimItem()" class="no-print px-1.5 py-0.5 bg-white text-slate-800 text-[10px] font-bold rounded border border-slate-300 shadow-sm">+ Add</button></div></td></tr>' + trim + '<tr class="font-black bg-slate-200 text-slate-900 border-t-2 border-b-2 border-slate-400"><td class="p-2 text-left border-r uppercase">DIRECT MANUFACTURING COST (₹)</td>' + dirCell + '<td class="p-2 border-r text-slate-900 font-black text-sm" id="fob-total">₹0.00</td></tr><tr class="bg-amber-50/70"><td class="p-2 text-left font-bold text-amber-950 border-r border-amber-200">GARMENT REJECTION %</td>' + rejP + '<td class="p-1.5 border-r border-amber-200 font-bold text-amber-900 text-center text-xs" id="rejection-pct-summary">-</td></tr><tr class="bg-amber-50/30"><td class="p-1.5 pl-4 text-left border-r border-amber-100 text-amber-900 font-semibold text-[11px]">REJECTION CUSHION AMOUNT (₹)</td>' + rejC + '<td class="p-1.5 border-r border-amber-100 font-black text-amber-950 text-xs" id="rejection-val-total">₹0.00</td></tr><tr class="font-extrabold bg-slate-100"><td class="p-2 text-left border-r border-slate-200">TOTAL COST POST REJECTION (₹)</td>' + pRej + '<td class="p-2 border-r border-slate-200 text-slate-900 font-bold" id="post-rejection-total">₹0.00</td></tr><tr class="bg-slate-100 border-y border-slate-300 text-slate-900 font-bold"><td class="p-1.5 px-3 text-left uppercase text-[11px]" colspan="' + totCols + '"><div class="flex items-center justify-between"><span class="font-black">LOGISTICS, TRANSPORT & TESTING</span><button onclick="addLogisticsItem()" class="no-print px-1.5 py-0.5 bg-white text-slate-800 text-[10px] font-bold rounded border border-slate-300 shadow-sm">+ Add</button></div></td></tr>' + log + '<tr class="bg-emerald-50/70 border-y border-emerald-200"><td class="p-2 text-left font-extrabold text-emerald-950 border-r border-emerald-200">OVERHEAD & PROFIT MARGIN %</td>' + marP + '<td class="p-1.5 border-r border-emerald-200 font-bold text-emerald-950 text-center text-xs" id="margin-pct-summary">-</td></tr><tr class="bg-emerald-50/30"><td class="p-1.5 pl-4 text-left border-r border-emerald-100 text-emerald-900 font-semibold text-[11px]">PROFIT MARGIN AMOUNT (₹)</td>' + marC + '<td class="p-1.5 border-r border-emerald-100 font-black text-emerald-950 text-xs" id="margin-val">₹0.00</td></tr><tr class="font-black bg-emerald-700 text-white"><td class="p-2.5 text-left border-r border-emerald-600 uppercase text-xs">NET FACTORY EX-FACTORY COST (₹)</td>' + exC + '<td class="p-2.5 border-r border-emerald-600 text-base font-black" id="final-total-local">₹0.00</td></tr><tr class="bg-indigo-50/80"><td class="p-2 text-left font-extrabold text-indigo-950 border-r border-indigo-200">BUYING COMMISSION %</td>' + comP + '<td class="p-1.5 border-r border-indigo-200 font-bold text-indigo-950 text-center text-xs" id="commission-pct-summary">-</td></tr><tr class="bg-indigo-50/30"><td class="p-1.5 pl-4 text-left border-r border-indigo-100 text-indigo-900 font-semibold text-[11px]">BUYING COMMISSION AMOUNT (₹)</td>' + comC + '<td class="p-1.5 border-r border-indigo-100 font-black text-indigo-950 text-xs" id="commission-val-total">₹0.00</td></tr><tr class="font-black bg-slate-900 text-emerald-300"><td class="p-2.5 text-left border-r border-slate-800 uppercase text-xs">FINAL BUYER QUOTE (<span class="currency-label-code">INR</span>)</td>' + buyC + '<td class="p-2.5 border-r border-slate-800 text-base font-black" id="final-total-converted">₹0.00</td></tr></tbody></table></div></div>'; }
+    function resetAllFabricCostsToCalculated() { appState.partFabricOverrides = {}; appState.garmentParts.forEach(p => { const i = document.getElementById('fabric-cost-' + p.id); if (i) i.dataset.manual = "false"; }); calculateAllCosting(); showToast('Fabric costs reset to auto-calculated'); }
+    function calculateAllCosting() { syncExpensesStateFromDOM(); let lossPct = getElValNum('loss-percent', 0), fabricRates = {}, fabricGsms = {}; appState.fabricColumns.forEach((fab, fIdx) => { let sub = 0; document.querySelectorAll('.fab-' + fIdx + '-cost').forEach(i => sub += parseFloat(i.value) || 0); setElText('fab-' + fIdx + '-subtotal', formatRupee(sub)); let l = sub * (lossPct / 100); setElText('fab-' + fIdx + '-loss', formatRupee(l)); let gt = sub + l; setElText('fab-' + fIdx + '-gtotal', formatRupee(gt)); fabricRates[fab.id] = gt; const gInp = document.getElementById('fab-gsm-' + fIdx); fabricGsms[fab.id] = gInp ? (parseFloat(gInp.value) || 0) : (parseFloat(fab.gsm) || 0); }); const priRate = fabricRates[appState.fabricColumns[0]?.id] || 0; setElText('total-fab-rate-display', formatRupee(priRate) + (appState.fabricTypeMode === 'woven' ? ' /meter' : ' /kg')); let totalWt = 0, totalCalcFabCost = 0, partBreakdown = {}; appState.garmentParts.forEach(p => partBreakdown[p.id] = { id: p.id, name: p.name, color: p.color || 'indigo', weight: 0, cost: 0 }); const unitFactor = appState.measurementUnit === 'inch' ? 6.4516 : 1.0; if (appState.fabricTypeMode === 'woven') { const wCons = getElValNum('woven-consumption', 0); totalWt = wCons; totalCalcFabCost = wCons * priRate; const firstP = appState.garmentParts[0]?.id || 'part-1'; if (partBreakdown[firstP]) { partBreakdown[firstP].weight = wCons; partBreakdown[firstP].cost = totalCalcFabCost; } } else { document.querySelectorAll('.measurement-card').forEach((card) => { let mult = parseFloat(card.querySelector('.panel-multiplier')?.value) || 1; let fabKey = card.querySelector('.component-fabric-select')?.value || appState.fabricColumns[0]?.id; let partKey = card.querySelector('.component-part-select')?.value || appState.garmentParts[0]?.id; let activeGsm = fabricGsms[fabKey] || 0, rTotals = []; card.querySelectorAll('.weight-row').forEach(r => { let v = parseFloat(r.querySelector('.val-input')?.value) || 0, a = parseFloat(r.querySelector('.allow-input')?.value) || 0; let tot = v > 0 ? v + a : 0; const c = r.querySelector('.row-total-val'); if (c) c.innerText = tot.toFixed(1); if (tot > 0) rTotals.push(tot); }); let l = 0, w = 0; if (rTotals.length >= 3) { l = rTotals[0] + rTotals[2]; w = rTotals[1]; } else if (rTotals.length === 2) { l = rTotals[0]; w = rTotals[1]; } else if (rTotals.length === 1) { l = rTotals[0]; w = 1; } let cardWt = (activeGsm > 0 && l > 0 && w > 0) ? (l * w * activeGsm * mult * unitFactor) / 10000000 : 0; const d = card.querySelector('.section-total-wt'); if (d) d.innerText = cardWt.toFixed(3) + ' kg'; totalWt += cardWt; let cCost = cardWt * (fabricRates[fabKey] || 0); totalCalcFabCost += cCost; if (!partBreakdown[partKey]) partBreakdown[partKey] = { id: partKey, name: 'Part', color: 'indigo', weight: 0, cost: 0 }; partBreakdown[partKey].weight += cardWt; partBreakdown[partKey].cost += cCost; }); } renderPartsBreakdownSummary(partBreakdown, totalWt); const wtLbl = appState.fabricTypeMode === 'woven' ? totalWt.toFixed(2) + ' m' : totalWt.toFixed(3) + ' kg'; setElText('grand-total-weight', wtLbl); setElText('kpi-total-weight', wtLbl); let sumFab = 0, sumCmt = 0, sumDir = 0, sumRej = 0, sumPost = 0, sumMar = 0, sumEx = 0, sumCom = 0, sumEmb = 0, sumTr = 0, sumLog = 0; let fx = getElValNum('exchange-rate', 1.0); if (fx <= 0) fx = 1; document.querySelectorAll('.embellishment-row').forEach(r => { let t = 0; appState.garmentParts.forEach(p => t += parseFloat(r.querySelector('.part-cost-' + p.id)?.value) || 0); const td = r.querySelector('.embellishment-row-total'); if (td) td.innerText = formatRupee(t); sumEmb += t; }); document.querySelectorAll('.trim-row').forEach(r => { let t = 0; appState.garmentParts.forEach(p => t += parseFloat(r.querySelector('.part-cost-' + p.id)?.value) || 0); const td = r.querySelector('.trim-row-total'); if (td) td.innerText = formatRupee(t); sumTr += t; }); document.querySelectorAll('.logistics-row').forEach(r => { let t = 0; appState.garmentParts.forEach(p => t += parseFloat(r.querySelector('.part-cost-' + p.id)?.value) || 0); const td = r.querySelector('.logistics-row-total'); if (td) td.innerText = formatRupee(t); sumLog += t; }); appState.garmentParts.forEach(p => { const fInp = document.getElementById('fabric-cost-' + p.id); let pFab = 0; if (fInp) { if (fInp.dataset.manual !== "true") { pFab = partBreakdown[p.id]?.cost || 0; fInp.value = pFab > 0 ? pFab.toFixed(2) : ''; } else { pFab = parseFloat(fInp.value) || 0; } } sumFab += pFab; const cInp = document.getElementById('cmt-cost-' + p.id); let pCmt = cInp ? (parseFloat(cInp.value) || 0) : 0; sumCmt += pCmt; let pEmb = 0; document.querySelectorAll('.embellishment-row .part-cost-' + p.id).forEach(i => pEmb += parseFloat(i.value) || 0); let pTr = 0; document.querySelectorAll('.trim-row .part-cost-' + p.id).forEach(i => pTr += parseFloat(i.value) || 0); let pLog = 0; document.querySelectorAll('.logistics-row .part-cost-' + p.id).forEach(i => pLog += parseFloat(i.value) || 0); let pDir = pFab + pCmt + pEmb + pTr; setElText('direct-cost-' + p.id, formatRupee(pDir)); sumDir += pDir; const rInp = document.getElementById('rejection-pct-' + p.id); let pRejPct = rInp && rInp.value !== '' ? (parseFloat(rInp.value) || 0) : 0; let pRejVal = pDir * (pRejPct / 100); setElText('rejection-cost-' + p.id, formatRupee(pRejVal)); sumRej += pRejVal; let pPostRej = pDir + pRejVal; setElText('post-rejection-' + p.id, formatRupee(pPostRej)); sumPost += pPostRej; const mInp = document.getElementById('margin-pct-' + p.id); let pMarPct = mInp && mInp.value !== '' ? (parseFloat(mInp.value) || 0) : 0; let pMarVal = pPostRej * (pMarPct / 100); setElText('margin-val-' + p.id, formatRupee(pMarVal)); sumMar += pMarVal; let pExFac = pPostRej + pMarVal + pLog; setElText('exfactory-' + p.id, formatRupee(pExFac)); sumEx += pExFac; const comInp = document.getElementById('commission-pct-' + p.id); let pComPct = comInp && comInp.value !== '' ? (parseFloat(comInp.value) || 0) : 0; let pComVal = pExFac * (pComPct / 100); setElText('commission-cost-' + p.id, formatRupee(pComVal)); sumCom += pComVal; let pQuote = pExFac + pComVal; setElText('buyer-quote-' + p.id, formatForeign(pQuote > 0 ? pQuote / fx : 0)); }); setElText('rejection-pct-summary', sumDir > 0 ? ((sumRej / sumDir) * 100).toFixed(1) + '%' : '-'); setElText('margin-pct-summary', sumPost > 0 ? ((sumMar / sumPost) * 100).toFixed(1) + '%' : '-'); setElText('commission-pct-summary', sumEx > 0 ? ((sumCom / sumEx) * 100).toFixed(1) + '%' : '-'); setElText('total-set-fabric-cost', formatRupee(sumFab)); setElText('total-set-cmt-cost', formatRupee(sumCmt)); setElText('fob-total', formatRupee(sumDir)); setElText('rejection-val-total', formatRupee(sumRej)); setElText('post-rejection-total', formatRupee(sumPost)); setElText('margin-val', formatRupee(sumMar)); setElText('final-total-local', formatRupee(sumEx)); setElText('kpi-factory-cost', formatRupee(sumEx)); setElText('commission-val-total', formatRupee(sumCom)); let finBuyer = sumEx + sumCom, convQuote = finBuyer > 0 ? finBuyer / fx : 0; setElText('final-total-converted', formatForeign(convQuote)); setElText('quote-price-val', convQuote.toFixed(2)); setElText('kpi-buyer-quote', formatForeign(convQuote)); setElText('kpi-fabric-cost', formatRupee(sumFab)); setElText('kpi-direct-cost', formatRupee(sumDir)); updateCostAnalyticsBar(sumFab, sumCmt, sumEmb, sumTr, sumMar, sumLog, sumRej, sumEx); }
+    function renderPartsBreakdownSummary(partBreakdown, totalWeight) { const c = document.getElementById('parts-breakdown-cards'); if (!c) return; let h = ''; appState.garmentParts.forEach(p => { const d = partBreakdown[p.id] || { weight: 0, cost: 0 }; const pct = totalWeight > 0 ? ((d.weight / totalWeight) * 100).toFixed(0) : '0'; h += '<div class="bg-white p-2.5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between"><div><div class="flex items-center gap-1.5 mb-0.5"><span class="w-2 h-2 rounded-full bg-' + p.color + '-500 inline-block"></span><span class="text-[10px] font-black text-slate-700 uppercase tracking-wider">' + p.name + '</span></div><div class="flex items-baseline gap-2"><span class="text-xs font-black text-slate-900">' + d.weight.toFixed(3) + ' ' + (appState.fabricTypeMode === 'woven' ? 'm' : 'kg') + '</span><span class="text-[10px] font-extrabold text-emerald-700">' + formatRupee(d.cost) + '</span></div></div><div class="text-right"><span class="text-[10px] font-black text-slate-400 block">' + pct + '%</span><span class="text-[9px] font-bold text-slate-400">of total</span></div></div>'; }); c.innerHTML = h; }
+    function updateCostAnalyticsBar(fab, cmt, emb, trim, mar, log, rej, tot) { if (!tot || tot <= 0) return; const pFab = (fab / tot) * 100, pCmt = (cmt / tot) * 100, pTr = ((trim + emb) / tot) * 100, pOps = ((log + rej) / tot) * 100, pM = (mar / tot) * 100; setElText('pct-bar-fab', pFab.toFixed(1) + '%'); setElText('pct-bar-cmt', pCmt.toFixed(1) + '%'); setElText('pct-bar-trim', pTr.toFixed(1) + '%'); setElText('pct-bar-ops', pOps.toFixed(1) + '%'); setElText('pct-bar-margin', pM.toFixed(1) + '%'); const bF = document.getElementById('bar-seg-fab'), bC = document.getElementById('bar-seg-cmt'), bT = document.getElementById('bar-seg-trim'), bO = document.getElementById('bar-seg-ops'), bM = document.getElementById('bar-seg-margin'); if (bF) bF.style.width = pFab + '%'; if (bC) bC.style.width = pCmt + '%'; if (bT) bT.style.width = pTr + '%'; if (bO) bO.style.width = pOps + '%'; if (bM) bM.style.width = pM + '%'; const badge = document.getElementById('profit-health-badge'); if (badge) { if (pM >= 12) { badge.className = 'px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'; badge.innerText = 'HIGH MARGIN'; } else if (pM >= 5) { badge.className = 'px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-400 border border-amber-500/30'; badge.innerText = 'HEALTHY MARGIN'; } else { badge.className = 'px-2 py-0.5 rounded text-[10px] font-black bg-rose-500/20 text-rose-400 border border-rose-500/30'; badge.innerText = 'LOW MARGIN'; } } }
+    function loadPresetTemplate(type) { pushUndoState(); if (type === 'tshirt') { appState = { buyerName: 'URBAN TEE CO', styleNo: 'TEE-2026-S1', styleDes: 'ROUND NECK T-SHIRT', fabricComp: '100% COTTON SINGLE JERSEY', fabricTypeMode: 'knit', measurementUnit: 'cm', isSetMode: false, garmentParts: [{ id: 'part-1', name: 'PART 1: MAIN GARMENT', code: 'P1', color: 'indigo' }], sizeRange: 'S - XXL', colour: 'NAVY BLUE', qty: '1000', targetCurrency: 'INR', exchangeRate: 1.0, lossPercent: '10', cmtCosts: { 'part-1': 22 }, partFabricOverrides: {}, partRejections: { 'part-1': '3' }, partMargins: { 'part-1': '12' }, partCommissions: { 'part-1': '0' }, fabricColumns: [{ id: 'fab-0', name: '100% COTTON S/J', gsm: '180' }, { id: 'fab-1', name: '1X1 COTTON RIB', gsm: '240' }], processList: [{ name: 'YARN', costs: { 'fab-0': 380, 'fab-1': 380 } }, { name: 'KNITTING', costs: { 'fab-0': 12, 'fab-1': 12 } }, { name: 'DYEING', costs: { 'fab-0': 50, 'fab-1': 50 } }, { name: 'COMPACTING', costs: { 'fab-0': 8, 'fab-1': 8 } }], embellishmentsList: [{ name: 'CHEST PRINT', costs: { 'part-1': 18 } }], trimsList: [{ name: 'SEWING THREAD', costs: { 'part-1': 3.00 } }, { name: 'HANG TAG', costs: { 'part-1': 2.00 } }, { name: 'POLY BAG', costs: { 'part-1': 1.00 } }, { name: 'MAIN LABEL', costs: { 'part-1': 2.00 } }], logisticsList: [{ name: 'LOCAL TRANSPORT', costs: { 'part-1': 3.00 } }], measurementSections: [{ id: 'm-card-1', title: 'BODY (100% COTTON S/J)', fabricId: 'fab-0', partId: 'part-1', multiplier: 2, rows: [{ label: 'BODY LENGTH', mmt: 70, allow: 3 }, { label: 'BODY WIDTH', mmt: 52, allow: 11.6 }, { label: 'SLEEVE LENGTH', mmt: 22, allow: 2 }] }, { id: 'm-card-2', title: 'NECK RIB (1X1 RIB)', fabricId: 'fab-1', partId: 'part-1', multiplier: 2, rows: [{ label: 'RIB HEIGHT', mmt: 3.8, allow: 1 }, { label: 'NECK CIRCUMFERENCE', mmt: 44, allow: 13.8 }] }] }; } restoreUIFromState(); pushUndoState(); showToast('Preset template loaded!'); }
+    function handleUnitToggle() { const s = document.getElementById('measurement-unit'); if (s) { appState.measurementUnit = s.value; document.querySelectorAll('.meas-unit-badge').forEach(b => b.innerText = appState.measurementUnit === 'inch' ? 'in' : 'cm'); calculateAllCosting(); } }
+    function handleFabricTypeToggle() { const m = document.getElementById('fabric-type-mode'); if (m) { appState.fabricTypeMode = m.value; const k = document.getElementById('measurement-box-container'), w = document.getElementById('woven-consumption-box'); if (appState.fabricTypeMode === 'woven') { k?.classList.add('hidden'); w?.classList.remove('hidden'); } else { k?.classList.remove('hidden'); w?.classList.add('hidden'); } calculateAllCosting(); } }
+    function restoreUIFromState() { setElVal('buyer-name', appState.buyerName); setElVal('style-no', appState.styleNo); setElVal('style-des', appState.styleDes); setElVal('fabric-comp', appState.fabricComp); setElVal('fabric-type-mode', appState.fabricTypeMode || 'knit'); setElVal('measurement-unit', appState.measurementUnit || 'cm'); setElVal('woven-consumption', appState.wovenConsumption); setElVal('size-range', appState.sizeRange); setElVal('colour', appState.colour); setElVal('qty', appState.qty); renderGarmentPartsPills(); handleFabricTypeToggle(); handleUnitToggle(); renderFabricationTable(); renderExpensesTable(); const c = document.getElementById('measurement-sections-container'); if (c) c.innerHTML = ''; if (appState.measurementSections?.length > 0) { appState.measurementSections.forEach(s => renderMeasurementSectionCard(s.id, s.title, s.rows, s.fabricId, s.partId, s.multiplier)); } updateCurrencySettings(); calculateAllCosting(); }
+    function removeProcessRow(i) { if (appState.processList.length <= 1) return; pushUndoState(); syncFabricationStateFromDOM(); appState.processList.splice(i, 1); renderFabricationTable(); calculateAllCosting(); pushUndoState(); }
+    function addProcessRow(i) { pushUndoState(); syncFabricationStateFromDOM(); const n = {}; appState.fabricColumns.forEach(f => n[f.id] = ''); appState.processList.splice(i !== undefined ? i + 1 : appState.processList.length, 0, { name: 'NEW PROCESS', costs: n }); renderFabricationTable(); calculateAllCosting(); pushUndoState(); }
+    function addFabricColumn() { pushUndoState(); syncFabricationStateFromDOM(); const id = 'fab-' + Date.now(); appState.fabricColumns.push({ id: id, name: 'FABRIC ' + (appState.fabricColumns.length + 1), gsm: '' }); renderFabricationTable(); updateFabricDropdowns(); calculateAllCosting(); pushUndoState(); }
+    function removeFabricColumn(i) { if (appState.fabricColumns.length <= 1) return; pushUndoState(); syncFabricationStateFromDOM(); const id = appState.fabricColumns[i].id; appState.fabricColumns.splice(i, 1); appState.measurementSections.forEach(s => { if (s.fabricId === id) s.fabricId = appState.fabricColumns[0].id; }); renderFabricationTable(); updateFabricDropdowns(); calculateAllCosting(); pushUndoState(); }
+    function getFabricOptionsHTML(sel) { let h = ''; appState.fabricColumns.forEach((f, idx) => { const t = document.getElementById('fab-title-' + idx); const name = t ? (t.value.trim() || f.name) : f.name; h += '<option value="' + f.id + '" ' + (sel === f.id ? 'selected' : '') + '>' + name + '</option>'; }); return h; }
+    function updateFabricDropdowns() { document.querySelectorAll('.component-fabric-select').forEach(s => s.innerHTML = getFabricOptionsHTML(s.value)); }
+    function initDefaultMeasurementSections() { appState.measurementSections = [{ id: 'm-card-1', title: 'BODY (COTTON JERSEY)', fabricId: 'fab-0', partId: 'part-1', multiplier: 2, rows: [{ label: 'BODY LENGTH', mmt: '', allow: '' }, { label: 'BODY WIDTH', mmt: '', allow: '' }] }, { id: 'm-card-2', title: 'NECK RIB / COLLAR', fabricId: 'fab-1', partId: 'part-1', multiplier: 1, rows: [{ label: 'RIB HEIGHT', mmt: '', allow: '' }, { label: 'NECK CIRCUMFERENCE', mmt: '', allow: '' }] }]; const c = document.getElementById('measurement-sections-container'); if (c) c.innerHTML = ''; appState.measurementSections.forEach(s => renderMeasurementSectionCard(s.id, s.title, s.rows, s.fabricId, s.partId, s.multiplier)); }
+    function createMeasurementRowHTML(r) { return '<tr class="weight-row hover:bg-slate-50 transition-colors"><td class="p-1 text-left font-semibold bg-slate-50 border-r border-slate-200"><input type="text" value="' + (r?.label ?? 'NEW MEASUREMENT') + '" oninput="calculateAllCosting(); pushUndoDebounced();" class="label-input w-full bg-transparent font-semibold text-slate-800 text-left focus:outline-none uppercase text-[11px]" placeholder="MEASUREMENT NAME"></td><td class="p-0 border-r border-slate-200"><input type="number" step="0.1" value="' + (r?.mmt ?? '') + '" oninput="calculateAllCosting(); pushUndoDebounced();" class="val-input table-cell-input text-slate-800 font-semibold" placeholder="0"></td><td class="p-0 border-r border-slate-200"><input type="number" step="0.1" value="' + (r?.allow ?? '') + '" oninput="calculateAllCosting(); pushUndoDebounced();" class="allow-input table-cell-input text-slate-800 font-semibold" placeholder="0"></td><td class="p-1.5 text-center font-extrabold text-slate-800 row-total-val text-[11px]">0.0</td><td class="p-1 text-center no-print border-l border-slate-200"><div class="flex items-center justify-center gap-1"><button onclick="addMeasurementRow(this)" class="text-slate-400 hover:text-emerald-600 px-1 text-[10px]"><i class="fa-solid fa-plus"></i></button><button onclick="removeMeasurementRow(this)" class="text-slate-400 hover:text-rose-600 px-1 text-[10px]"><i class="fa-solid fa-xmark"></i></button></div></td></tr>'; }
+    function addMeasurementRow(t) { pushUndoState(); syncAllStateFromDOM(); let row = t?.closest ? t.closest('tr') : null; const h = createMeasurementRowHTML(); if (row) row.insertAdjacentHTML('afterend', h); calculateAllCosting(); pushUndoState(); }
+    function removeMeasurementRow(b) { const r = b.closest('tr'); if (r?.closest('tbody')?.querySelectorAll('.weight-row')?.length > 1) { pushUndoState(); r.remove(); calculateAllCosting(); pushUndoState(); } }
+    function renderMeasurementSectionCard(id, title, rows, fab, part, mult) { const c = document.getElementById('measurement-sections-container'); if (!c) return; let rHTML = ''; rows.forEach(r => rHTML += createMeasurementRowHTML(r)); c.insertAdjacentHTML('beforeend', '<div id="' + id + '" class="measurement-card bg-white rounded-xl border border-slate-300 overflow-hidden shadow-sm"><div class="bg-slate-800 p-2 px-3 flex flex-wrap items-center justify-between gap-2 text-white"><input type="text" value="' + title + '" oninput="pushUndoDebounced()" class="section-title-input text-xs font-black bg-transparent text-emerald-300 uppercase focus:outline-none flex-1 min-w-[140px]"><div class="flex items-center gap-2"><div class="flex items-center gap-1 bg-slate-900/90 px-2 py-0.5 rounded border border-slate-700"><label class="text-[10px] text-emerald-400 font-bold">Part:</label><select onchange="calculateAllCosting(); pushUndoDebounced();" class="component-part-select bg-transparent text-[10px] font-black text-emerald-300 focus:outline-none">' + getPartOptionsHTML(part) + '</select></div><div class="flex items-center gap-1 bg-slate-900/90 px-2 py-0.5 rounded border border-slate-700"><label class="text-[10px] text-amber-400 font-bold">Fabric:</label><select onchange="calculateAllCosting(); pushUndoDebounced();" class="component-fabric-select bg-transparent text-[10px] font-black text-amber-300 focus:outline-none">' + getFabricOptionsHTML(fab) + '</select></div><div class="flex items-center gap-1.5 no-print"><button onclick="addMeasurementRow(this)" class="px-2 py-0.5 bg-slate-700 hover:bg-slate-600 text-white text-[10px] font-bold rounded">+ Row</button><input type="number" value="' + mult + '" min="1" class="panel-multiplier w-9 bg-slate-900 text-center text-xs font-extrabold text-emerald-300 rounded py-0.5" oninput="calculateAllCosting(); pushUndoDebounced();"><button onclick="removeMeasurementCard(\\'' + id + '\\')" class="text-slate-400 hover:text-rose-400 text-xs px-1"><i class="fa-solid fa-trash-can"></i></button></div></div></div><table class="w-full text-xs text-center border-collapse"><thead><tr class="bg-emerald-50/90 text-emerald-950 font-black text-[10px] border-b border-emerald-200"><th class="p-1.5 text-left border-r border-emerald-200 w-2/5">MEASUREMENT SPEC</th><th class="p-1.5 border-r border-emerald-200">MMT</th><th class="p-1.5 border-r border-emerald-200">ALLOW</th><th class="p-1.5 border-r border-emerald-200">TOTAL</th><th class="p-1.5 no-print w-8"></th></tr></thead><tbody class="divide-y divide-slate-200">' + rHTML + '<tr class="font-extrabold bg-emerald-100/80 text-emerald-950 border-t border-emerald-300 section-total-row"><td class="p-2 text-left border-r border-emerald-200 text-[11px]" colspan="2">COMPONENT NET WEIGHT</td><td class="p-2 text-right border-r border-emerald-200 section-total-wt text-xs font-black text-emerald-900" colspan="3">0.000 kg</td></tr></tbody></table></div>'); }
+    function addMeasurementSection() { pushUndoState(); syncAllStateFromDOM(); renderMeasurementSectionCard('m-card-' + Date.now(), 'NEW COMPONENT MEASUREMENT', [{ label: 'BODY LENGTH', mmt: '', allow: '' }, { label: 'BODY WIDTH', mmt: '', allow: '' }], appState.fabricColumns[0]?.id, appState.garmentParts[0]?.id, 2); calculateAllCosting(); pushUndoState(); }
+    function removeMeasurementCard(id) { pushUndoState(); document.getElementById(id)?.remove(); calculateAllCosting(); pushUndoState(); }
+    function handleImageUpload(input) { if (input.files?.[0]) { const r = new FileReader(); r.onload = (e) => { const p = document.getElementById('garment-preview'); if (p) { p.src = e.target.result; p.classList.remove('hidden'); document.getElementById('upload-placeholder')?.classList.add('hidden'); document.getElementById('remove-img-btn')?.classList.remove('hidden'); } }; r.readAsDataURL(input.files[0]); } }
+    function removeGarmentImage() { setElVal('garment-img-input', ''); const p = document.getElementById('garment-preview'); if (p) { p.src = ''; p.classList.add('hidden'); document.getElementById('upload-placeholder')?.classList.remove('hidden'); document.getElementById('remove-img-btn')?.classList.add('hidden'); } }
+    function clearAllData() { pushUndoState(); initDefaultMeasurementSections(); document.querySelectorAll('input[type="number"]').forEach(i => i.value = ''); calculateAllCosting(); pushUndoState(); showToast('All values cleared'); }
+    function downloadCostingPDF(mode) { const el = document.getElementById('pdf-container'); if (!el) return; showToast('Generating PDF...'); html2pdf().set({ margin: [0.2, 0.2, 0.2, 0.2], filename: 'GarmentCostSheet.pdf', image: { type: 'jpeg', quality: 0.98 }, html2canvas: { scale: 2 }, jsPDF: { unit: 'in', format: 'a3', orientation: 'landscape' } }).from(el).save().then(() => showToast('PDF Exported!')); }
+    window.onload = function() { renderGarmentPartsPills(); renderFabricationTable(); renderExpensesTable(); initDefaultMeasurementSections(); updateCurrencySettings(); updateFabricDropdowns(); calculateAllCosting(); pushUndoState(); };
+  </script></head><body class="p-2 sm:p-4 lg:p-6 min-h-screen">
+  <div id="toast-notification" class="hidden fixed top-4 right-4 z-50 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-2xl border border-slate-700 flex items-center gap-2.5 animate-toast text-xs font-bold no-print"><i class="fa-solid fa-circle-check text-emerald-400"></i><span id="toast-text">Action completed</span></div>
+  <div id="pdf-container" class="max-w-[1600px] mx-auto space-y-4">
+    <header class="bg-slate-900 text-white p-4 rounded-xl shadow-lg border border-slate-800 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="bg-emerald-500/20 text-emerald-400 p-2.5 rounded-lg border border-emerald-500/30"><i class="fa-solid fa-calculator text-2xl"></i></div>
+        <div><h1 class="text-xl font-black tracking-tight text-white flex items-center gap-2">GARCOS <span class="text-xs font-bold bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30">ENTERPRISE PRO</span></h1><p class="text-[11px] text-slate-400 font-medium">Textile Costing, Consumption & Multi-Currency Quotation Suite</p></div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap no-print">
+        <button id="undo-btn" onclick="undo()" class="px-2.5 py-1.5 bg-slate-800 text-slate-300 font-bold text-xs rounded-lg border border-slate-700"><i class="fa-solid fa-rotate-left"></i> Undo</button>
+        <button id="redo-btn" onclick="redo()" class="px-2.5 py-1.5 bg-slate-800 text-slate-300 font-bold text-xs rounded-lg border border-slate-700"><i class="fa-solid fa-rotate-right"></i> Redo</button>
+        <button onclick="loadPresetTemplate('tshirt')" class="px-3 py-1.5 bg-indigo-600 text-white font-bold text-xs rounded-lg shadow-sm"><i class="fa-solid fa-shirt"></i> T-Shirt Preset</button>
+        <button onclick="downloadCostingPDF('full')" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-lg shadow-sm"><i class="fa-solid fa-file-pdf"></i> Download PDF</button>
+        <button onclick="clearAllData()" class="px-3 py-1.5 bg-rose-700 hover:bg-rose-600 text-white font-bold text-xs rounded-lg shadow-sm"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+      </div>
+    </header>
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 no-print">
+      <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between"><div><span class="text-[10px] font-extrabold text-slate-400 uppercase block">GARMENT CONSUMPTION</span><span class="text-sm sm:text-base font-black text-slate-900" id="kpi-total-weight">0.000 kg</span></div><div class="text-emerald-600 bg-emerald-50 p-2.5 rounded-lg text-xs"><i class="fa-solid fa-weight-hanging"></i></div></div>
+      <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between"><div><span class="text-[10px] font-extrabold text-slate-400 uppercase block">FABRIC COST</span><span class="text-sm sm:text-base font-black text-emerald-800" id="kpi-fabric-cost">₹0.00</span></div><div class="text-emerald-600 bg-emerald-50 p-2.5 rounded-lg text-xs"><i class="fa-solid fa-scroll"></i></div></div>
+      <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between"><div><span class="text-[10px] font-extrabold text-slate-400 uppercase block">DIRECT COST</span><span class="text-sm sm:text-base font-black text-slate-900" id="kpi-direct-cost">₹0.00</span></div><div class="text-blue-600 bg-blue-50 p-2.5 rounded-lg text-xs"><i class="fa-solid fa-tags"></i></div></div>
+      <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between"><div><span class="text-[10px] font-extrabold text-slate-400 uppercase block">EX-FACTORY NET</span><span class="text-sm sm:text-base font-black text-slate-900" id="kpi-factory-cost">₹0.00</span></div><div class="text-amber-600 bg-amber-50 p-2.5 rounded-lg text-xs"><i class="fa-solid fa-industry"></i></div></div>
+      <div class="bg-slate-900 p-3 rounded-xl border border-slate-800 shadow-sm flex items-center justify-between col-span-2 sm:col-span-1"><div><div class="flex items-center gap-1.5 mb-0.5"><span class="text-[10px] font-extrabold text-emerald-400 uppercase block">BUYER QUOTE</span><span id="profit-health-badge" class="px-1.5 py-0.2 rounded text-[9px] font-black bg-slate-700 text-slate-300">PENDING</span></div><span class="text-sm sm:text-base font-black text-emerald-300" id="kpi-buyer-quote">₹0.00</span></div><div class="text-emerald-400 bg-slate-800 p-2.5 rounded-lg text-xs"><i class="fa-solid fa-coins"></i></div></div>
+    </div>
+    <div class="bg-slate-900 p-3 rounded-xl border border-slate-800 text-white shadow-sm no-print">
+      <div class="flex items-center justify-between text-[11px] font-extrabold text-slate-300 mb-1.5">
+        <span class="flex items-center gap-1.5 uppercase"><i class="fa-solid fa-chart-pie text-emerald-400"></i> Cost Distribution Analytics</span>
+        <div class="flex items-center gap-3 text-[10px]"><span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span> Fabric (<span id="pct-bar-fab">0%</span>)</span><span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500 inline-block"></span> CMT (<span id="pct-bar-cmt">0%</span>)</span><span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span> Margin (<span id="pct-bar-margin">0%</span>)</span></div>
+      </div>
+      <div class="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden flex">
+        <div id="bar-seg-fab" class="bg-emerald-500 h-full transition-all duration-300" style="width:0%"></div>
+        <div id="bar-seg-cmt" class="bg-blue-500 h-full transition-all duration-300" style="width:0%"></div>
+        <div id="bar-seg-trim" class="bg-indigo-500 h-full transition-all duration-300" style="width:0%"></div>
+        <div id="bar-seg-ops" class="bg-rose-500 h-full transition-all duration-300" style="width:0%"></div>
+        <div id="bar-seg-margin" class="bg-amber-500 h-full transition-all duration-300" style="width:0%"></div>
+      </div>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-300 p-4 shadow-sm">
+      <div class="flex flex-wrap items-center justify-between border-b border-slate-200 pb-2 mb-3 gap-2">
+        <h2 class="text-xs font-black uppercase text-slate-800 flex items-center gap-2"><i class="fa-solid fa-file-signature text-emerald-600"></i> Style Specification & Buyer Details</h2>
+        <div class="flex items-center gap-3 no-print">
+          <div class="flex items-center gap-1.5"><label class="text-[10px] font-bold text-slate-500">Fabric Type:</label><select id="fabric-type-mode" onchange="handleFabricTypeToggle(); pushUndoDebounced();" class="text-xs font-bold bg-slate-100 border border-slate-300 rounded px-2 py-1"><option value="knit" selected>Knit Garment (GSM & Panel)</option><option value="woven">Woven Garment (Meters)</option></select></div>
+          <div class="flex items-center gap-1.5"><label class="text-[10px] font-bold text-slate-500">Target FX:</label><select id="target-currency" onchange="updateCurrencySettings(true); pushUndoDebounced();" class="text-xs font-bold bg-slate-100 border border-slate-300 rounded px-2 py-1"><option value="INR" data-symbol="₹" data-rate="1.0" selected>INR (₹)</option><option value="USD" data-symbol="$" data-rate="83.5">USD ($)</option><option value="EUR" data-symbol="€" data-rate="91.0">EUR (€)</option><option value="GBP" data-symbol="£" data-rate="105.0">GBP (£)</option></select></div>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+        <div class="md:col-span-8 grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+          <div><label class="text-[10px] font-bold text-slate-500 uppercase block">BUYER NAME</label><input type="text" id="buyer-name" placeholder="Buyer Name" class="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 font-bold text-slate-800"></div>
+          <div><label class="text-[10px] font-bold text-slate-500 uppercase block">STYLE REF NO</label><input type="text" id="style-no" placeholder="Style Ref" class="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 font-bold text-slate-800"></div>
+          <div><label class="text-[10px] font-bold text-slate-500 uppercase block">STYLE DESCRIPTION</label><input type="text" id="style-des" placeholder="Description" class="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 font-bold text-slate-800"></div>
+          <div><label class="text-[10px] font-bold text-slate-500 uppercase block">FABRIC COMPOSITION</label><input type="text" id="fabric-comp" placeholder="e.g. 100% Cotton" class="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 font-bold text-slate-800"></div>
+          <div><label class="text-[10px] font-bold text-slate-500 uppercase block">SIZE RANGE</label><input type="text" id="size-range" placeholder="S - XXL" class="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 font-bold text-slate-800"></div>
+          <div><label class="text-[10px] font-bold text-slate-500 uppercase block">ORDER QTY (PCS)</label><input type="number" id="qty" placeholder="1000" class="w-full bg-slate-50 border border-slate-300 rounded px-2 py-1 font-bold text-slate-800"></div>
+        </div>
+        <div class="md:col-span-4 flex items-center justify-center border-t md:border-t-0 md:border-l border-slate-200 pt-3 md:pt-0 pl-0 md:pl-4">
+          <div class="relative w-44 h-44 bg-slate-50 border border-slate-300 rounded-2xl overflow-hidden flex flex-col items-center justify-center p-3 group hover:border-emerald-500 transition-all shadow-sm">
+            <img id="garment-preview" class="hidden w-full h-full object-contain" alt="Preview">
+            <div id="upload-placeholder" class="text-center p-2"><i class="fa-solid fa-cloud-arrow-up text-3xl text-slate-400 mb-1"></i><span class="block text-xs font-bold text-slate-600">Garment / Tech Photo</span><span class="block text-[10px] text-slate-400">Click to upload</span></div>
+            <input type="file" id="garment-img-input" accept="image/*" onchange="handleImageUpload(this)" class="absolute inset-0 opacity-0 cursor-pointer">
+            <button id="remove-img-btn" onclick="removeGarmentImage()" class="hidden absolute top-2 right-2 bg-rose-600 text-white rounded-full w-6 h-6 text-xs flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="bg-white rounded-xl border border-slate-300 p-3 shadow-sm flex flex-wrap items-center justify-between gap-2.5">
+      <div class="flex items-center gap-2 flex-wrap"><span class="text-xs font-black uppercase text-slate-800"><i class="fa-solid fa-layer-group text-indigo-600"></i> Garment Set Pieces:</span><div id="garment-parts-pills-container" class="flex items-center gap-2 flex-wrap"></div></div>
+      <button onclick="addGarmentPart()" class="no-print px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-lg flex items-center gap-1.5 shadow-sm"><i class="fa-solid fa-plus text-[10px]"></i> Add Part / Piece</button>
+    </div>
+    <div id="costing-breakdown-section" class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <div id="left-costing-col" class="lg:col-span-6 space-y-4">
+        <div class="bg-white rounded-xl border border-slate-300 overflow-hidden shadow-sm">
+          <div class="bg-slate-800 p-2.5 px-3 flex items-center justify-between text-white border-b border-slate-700">
+            <span class="text-xs font-black tracking-wider uppercase text-emerald-300"><i class="fa-solid fa-sliders"></i> Fabrication & Process Costing (₹)</span>
+            <div class="flex items-center gap-2 no-print"><button onclick="addFabricColumn()" class="px-2 py-1 bg-emerald-600 text-white text-[10px] font-bold rounded shadow-sm">+ Fabric</button><button onclick="addProcessRow()" class="px-2 py-1 bg-slate-700 text-white text-[10px] font-bold rounded">+ Process</button></div>
+          </div>
+          <div id="fabrication-table-wrapper" class="overflow-x-auto custom-scrollbar"></div>
+        </div>
+        <div id="expenses-table-wrapper"></div>
+      </div>
+      <div id="right-costing-col" class="lg:col-span-6 space-y-4">
+        <div id="woven-consumption-box" class="hidden bg-white rounded-xl border border-slate-300 p-4 shadow-sm"><h3 class="text-xs font-black text-slate-800 uppercase mb-2">Woven Fabric Consumption</h3><input type="number" step="0.01" id="woven-consumption" placeholder="e.g. 1.45" oninput="calculateAllCosting(); pushUndoDebounced();" class="w-full bg-emerald-50 border border-emerald-300 rounded px-2.5 py-1.5 font-black text-emerald-950 text-sm"></div>
+        <div id="measurement-box-container" class="bg-white rounded-xl border border-slate-300 p-3.5 shadow-sm">
+          <div class="bg-slate-800 p-2.5 px-3 rounded-lg flex items-center justify-between text-white mb-3 border border-slate-700">
+            <span class="text-xs font-black tracking-wider uppercase text-emerald-300"><i class="fa-solid fa-ruler-combined"></i> Component Measurements & Consumption</span>
+            <button onclick="addMeasurementSection()" class="no-print px-2.5 py-1 bg-emerald-600 text-white text-[10px] font-bold rounded-lg shadow-sm">+ Component</button>
+          </div>
+          <div id="measurement-sections-container" class="space-y-4"></div>
+          <div class="mt-4 pt-3 border-t border-slate-200"><span class="text-[10px] font-black uppercase text-slate-500 tracking-wider block mb-2">Itemized Garment Piece Breakdown</span><div id="parts-breakdown-cards" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div></div>
+          <div class="mt-3 p-3 bg-emerald-50/90 rounded-xl border border-emerald-200 flex flex-wrap items-center justify-between gap-3">
+            <div><span class="text-[10px] font-black uppercase text-emerald-800 tracking-wider block">GRAND TOTAL CONSUMPTION</span></div>
+            <div class="text-right"><span class="text-lg font-black text-emerald-950 block" id="grand-total-weight">0.000 kg</span><span class="text-[11px] font-extrabold text-emerald-800">Primary Rate: <span id="total-fab-rate-display">₹0.00 /kg</span></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <footer class="mt-6 pt-4 border-t border-slate-200 text-center text-xs text-slate-500 font-semibold no-print">
+      © 2026 GarKos · Garment Costing Pro
+    </footer>
+  </div>
+</body></html>`;

@@ -1,34 +1,41 @@
 import { NextResponse } from "next/server";
 import Razorpay from "razorpay";
 
-const razorpay = new Razorpay({
-    key_id: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID!,
-    key_secret: process.env.RAZORPAY_KEY_SECRET!,
-});
-
 export async function POST(req: Request) {
     try {
-        const { planType } = await req.json();
+        const key_id = process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID;
+        const key_secret = process.env.RAZORPAY_KEY_SECRET;
 
-        let planId: string | undefined;
-
-        if (planType === "basic") {
-            planId = process.env.RAZORPAY_PLAN_BASIC;
-        } else if (planType === "premium") {
-            planId = process.env.RAZORPAY_PLAN_PREMIUM;
-        } else if (planType === "yearly") {
-            planId = process.env.RAZORPAY_PLAN_YEARLY;
+        if (!key_id || !key_secret) {
+            return NextResponse.json(
+                { error: "Razorpay credentials not configured in environment variables." },
+                { status: 500 }
+            );
         }
 
-        if (!planId) {
+        const razorpay = new Razorpay({
+            key_id,
+            key_secret,
+        });
+
+        const { planType } = await req.json();
+
+        let plan_id = process.env.RAZORPAY_PLAN_BASIC;
+        if (planType === "premium" || planType === "pro") {
+            plan_id = process.env.RAZORPAY_PLAN_PREMIUM;
+        } else if (planType === "yearly") {
+            plan_id = process.env.RAZORPAY_PLAN_YEARLY;
+        }
+
+        if (!plan_id) {
             return NextResponse.json(
-                { error: `Razorpay Plan ID not configured for tier: ${planType}` },
+                { error: `Plan ID for ${planType} is missing in environment variables.` },
                 { status: 400 }
             );
         }
 
         const subscription = await razorpay.subscriptions.create({
-            plan_id: planId,
+            plan_id,
             total_count: planType === "yearly" ? 5 : 12,
             quantity: 1,
             customer_notify: 1,
@@ -36,9 +43,13 @@ export async function POST(req: Request) {
 
         return NextResponse.json({
             subscriptionId: subscription.id,
-            key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
+            key: key_id,
         });
     } catch (error: any) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
+        console.error("Razorpay subscription error:", error);
+        return NextResponse.json(
+            { error: error.message || "Failed to create subscription" },
+            { status: 500 }
+        );
     }
 }

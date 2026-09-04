@@ -29,11 +29,12 @@ export async function POST(req: Request) {
 
         if (!plan_id) {
             return NextResponse.json(
-                { error: `Plan ID for ${planType} is missing in environment variables.` },
+                { error: `Plan ID for ${planType} is missing in Netlify environment variables.` },
                 { status: 400 }
             );
         }
 
+        // Creates recurring AutoPay subscription schedule
         const subscription = await razorpay.subscriptions.create({
             plan_id,
             total_count: planType === "yearly" ? 5 : 12,
@@ -46,9 +47,9 @@ export async function POST(req: Request) {
             key: key_id,
         });
     } catch (error: any) {
-        console.error("Razorpay subscription error:", error);
+        console.error("Razorpay subscription creation error:", error);
         return NextResponse.json(
-            { error: error.message || "Failed to create subscription" },
+            { error: error.message || "Failed to initiate AutoPay subscription" },
             { status: 500 }
         );
     }

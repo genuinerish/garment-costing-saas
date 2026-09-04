@@ -10,14 +10,19 @@ export async function POST(req: Request) {
     try {
         const { planType } = await req.json();
 
-        const planId =
-            planType === "yearly"
-                ? process.env.RAZORPAY_PLAN_YEARLY
-                : process.env.RAZORPAY_PLAN_MONTHLY;
+        let planId: string | undefined;
+
+        if (planType === "basic") {
+            planId = process.env.RAZORPAY_PLAN_BASIC;
+        } else if (planType === "premium") {
+            planId = process.env.RAZORPAY_PLAN_PREMIUM;
+        } else if (planType === "yearly") {
+            planId = process.env.RAZORPAY_PLAN_YEARLY;
+        }
 
         if (!planId) {
             return NextResponse.json(
-                { error: "Razorpay Plan ID not configured." },
+                { error: `Razorpay Plan ID not configured for tier: ${planType}` },
                 { status: 400 }
             );
         }

@@ -18,7 +18,7 @@ export async function POST(req: Request) {
             key_secret,
         });
 
-        const { planType } = await req.json();
+        const { planType, email } = await req.json();
 
         let plan_id = process.env.RAZORPAY_PLAN_BASIC;
         if (planType === "premium" || planType === "pro") {
@@ -34,12 +34,14 @@ export async function POST(req: Request) {
             );
         }
 
-        // Creates recurring AutoPay subscription schedule
         const subscription = await razorpay.subscriptions.create({
             plan_id,
             total_count: planType === "yearly" ? 5 : 12,
             quantity: 1,
             customer_notify: 1,
+            notes: {
+                client_email: email || "unknown",
+            },
         });
 
         return NextResponse.json({

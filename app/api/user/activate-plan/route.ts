@@ -1,40 +1,36 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
-import { createServerClient } from "@supabase/ssr";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 export async function POST(req: Request) {
     try {
-        const { tier, subscriptionId } = await req.json();
-        const cookieStore = await cookies();
+        const { email, tier, subscriptionId } = await req.json();
 
-        const supabase = createServerClient(
-            process.env.NEXT_PUBLIC_SUPABASE_URL!,
-            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-            {
-                cookies: {
-                    getAll() { return cookieStore.getAll(); },
-                    setAll(cookiesToSet) {
-                        cookiesToSet.forEach(({ name, value, options }) =>
-                            cookieStore.set(name, value, options)
-                        );
-                    },
-                },
-            }
-        );
+        if (!email) {
+            return NextResponse.json({ error: "Email is required" }, { status: 400 });
+        }
 
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-        const { error } = await supabase
+        // Upsert user profile linked to the email submitted before payment
+        const { error } = await supabaseAdmin
             .from("profiles")
-            .update({
-                subscription_status: "active",
-                plan_tier: tier,
-                razorpay_subscription_id: subscriptionId,
-            })
-            .eq("id", user.id);
+            .upsert(
+                {
+                    email,
+                    plan_tier: tier,
+                    subscription_status: "active",
+                    razorpay_subscription_id: subscriptionId,
+                    updated_at: new Date().toISOString(),
+                },
+                { onConflict: "email" }
+            );
 
-        if (error) throw error;
+        if (error) {
+            console.error("Supabase upsert error:", error);
+        }
 
         return NextResponse.json({ success: true });
     } catch (err: any) {

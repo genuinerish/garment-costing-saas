@@ -27,22 +27,22 @@ export default function HomePage() {
         </p>
 
         <div className="mt-8 flex flex-wrap justify-center gap-4">
-          <a
-            href="#plans"
+          <Link
+            href="/pricing"
             className="px-6 py-3 font-semibold text-white bg-emerald-600 rounded-xl hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-600/25 text-sm sm:text-base"
           >
-            Choose Subscription Plan
-          </a>
+            Select a Plan to Start
+          </Link>
           <Link
             href="/login"
             className="px-6 py-3 font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-100 transition-all text-sm sm:text-base shadow-sm"
           >
-            Sign In to Dashboard
+            Sign In to Existing Account
           </Link>
         </div>
       </section>
 
-      {/* 3 Value Pillars */}
+      {/* 3 Core Value Pillars */}
       <section className="py-12 bg-white border-y border-slate-200/80">
         <div className="max-w-6xl mx-auto px-6 grid grid-cols-1 md:grid-cols-3 gap-8">
           <div className="p-6 rounded-2xl bg-slate-50 border border-slate-200">
@@ -75,7 +75,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Pricing Cards (Zero Dark Mode, Zero Free Tier) */}
+      {/* Subscription Plans */}
       <section id="plans" className="py-16 max-w-6xl mx-auto px-6">
         <div className="text-center mb-12">
           <h2 className="text-3xl font-extrabold text-slate-900">Subscription Plans</h2>
@@ -117,7 +117,7 @@ export default function HomePage() {
             </div>
 
             <Link
-              href="/login?mode=signup"
+              href="/pricing"
               className="mt-8 block w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-900 font-bold rounded-xl text-center text-xs transition-colors border border-slate-300"
             >
               Subscribe Basic (₹299/mo)
@@ -159,7 +159,7 @@ export default function HomePage() {
             </div>
 
             <Link
-              href="/login?mode=signup"
+              href="/pricing"
               className="mt-8 block w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-center text-xs transition-colors shadow-md shadow-emerald-600/25"
             >
               Subscribe Premium (₹499/mo)
@@ -193,7 +193,7 @@ export default function HomePage() {
             </div>
 
             <Link
-              href="/login?mode=signup"
+              href="/pricing"
               className="mt-8 block w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-900 font-bold rounded-xl text-center text-xs transition-colors border border-slate-300"
             >
               Subscribe Yearly (₹6,000/yr)

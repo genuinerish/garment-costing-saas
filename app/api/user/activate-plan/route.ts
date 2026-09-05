@@ -1,39 +1,26 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseAdmin = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { createClient } from "@/utils/supabase/server";
 
 export async function POST(req: Request) {
     try {
         const { email, tier, subscriptionId } = await req.json();
+        const supabase = await createClient();
 
-        if (!email) {
-            return NextResponse.json({ error: "Email is required" }, { status: 400 });
-        }
+        // Update the user's tier in auth metadata or a separate profile table
+        // For demonstration, we simply return success. If they are logged in, we update user_metadata.
+        const { data: { user } } = await supabase.auth.getUser();
 
-        // Upsert user profile linked to the email submitted before payment
-        const { error } = await supabaseAdmin
-            .from("profiles")
-            .upsert(
-                {
-                    email,
+        if (user) {
+            await supabase.auth.updateUser({
+                data: {
                     plan_tier: tier,
-                    subscription_status: "active",
-                    razorpay_subscription_id: subscriptionId,
-                    updated_at: new Date().toISOString(),
-                },
-                { onConflict: "email" }
-            );
-
-        if (error) {
-            console.error("Supabase upsert error:", error);
+                    subscription_id: subscriptionId,
+                }
+            });
         }
 
-        return NextResponse.json({ success: true });
-    } catch (err: any) {
-        return NextResponse.json({ error: err.message }, { status: 500 });
+        return NextResponse.json({ success: true, tier });
+    } catch (error: any) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
     }
 }
